@@ -301,29 +301,30 @@ jobs:
             echo "警告: 未找到Coq或文本文件，创建示例文件"
             # 修复heredocument的EOF标记 - 使用不同的结束标记避免冲突
             cat > src/FormalCert_Probability_System.v << 'COQ_EOF'
-(* FormalCert Probability System - Example File *)
-Require Import Coq.Arith.Arith.
-Require Import Coq.Lists.List.
 
-(* Example theorem *)
-Theorem example_theorem : 1 + 1 = 2.
-Proof.
-  simpl.
-  reflexivity.
-Qed.
-
-(* Probability example *)
-Definition probability_space := Type.
-Definition event := Prop.
-Definition measure : probability_space -> event -> nat :=
-  fun _ _ => 0.
-
-(* Test compilation *)
-Example test_example : True.
-Proof.
-  exact I.
-Qed.
-COQ_EOF
+            (* FormalCert Probability System - Example File *)
+            Require Import Coq.Arith.Arith.
+            Require Import Coq.Lists.List.
+            
+            (* Example theorem *)
+            Theorem example_theorem : 1 + 1 = 2.
+            Proof.
+              simpl.
+              reflexivity.
+            Qed.
+            
+            (* Probability example *)
+            Definition probability_space := Type.
+            Definition event := Prop.
+            Definition measure : probability_space -> event -> nat :=
+              fun _ _ => 0.
+            
+            (* Test compilation *)
+            Example test_example : True.
+            Proof.
+              exact I.
+            Qed.
+            EOF
           fi
           
           # 确保文件编码正确
