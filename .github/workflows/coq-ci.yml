@@ -243,7 +243,7 @@ jobs:
           path: coq-image.tar
           retention-days: 1
 
-  # 阶段2: 代码预处理和文件准备（修复here-document问题）
+  # 阶段2: 代码预处理和文件准备
   prepare:
     name: 准备Coq文件
     runs-on: ubuntu-22.04
@@ -266,7 +266,7 @@ jobs:
           echo "已加载的Docker镜像:"
           docker images | grep "${{ env.DOCKER_IMAGE_NAME }}"
       
-      - name: 处理Coq文件（修复here-document问题）
+      - name: 处理Coq文件
         run: |
           echo "准备Coq文件..."
           
@@ -299,7 +299,6 @@ jobs:
             cp "$FIRST_TEXT" "src/FormalCert_Probability_System.v"
           else
             echo "警告: 未找到Coq或文本文件，创建示例文件"
-            # 使用不会冲突的结束标记
             cat > src/FormalCert_Probability_System.v << 'COQEOF'
 (* FormalCert Probability System - Example File *)
 Require Import Coq.Arith.Arith.
@@ -459,7 +458,7 @@ COQEOF
         run: |
           echo "生成语法检查报告..."
           
-          cat > syntax_report.md << EOF
+          cat > syntax_report.md << 'REPORTEOF'
           # Coq语法检查报告
           
           ## 基本信息
@@ -474,7 +473,7 @@ COQEOF
           - **权限修复**: 使用GitHub Actions缓存，避免组织包权限问题
           
           ## 文件状态
-          EOF
+          REPORTEOF
           
           if [ -f "src/FormalCert_Probability_System.v" ]; then
             LINES=$(wc -l < src/FormalCert_Probability_System.v 2>/dev/null || echo "0")
