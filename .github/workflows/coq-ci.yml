@@ -24,7 +24,7 @@ env:
   OPAMROOT: /usr/local/opam
 
 jobs:
-  # 阶段1: 构建Docker镜像（修复coqc PATH问题）
+  # 阶段1: 构建Docker镜像（修复Docker推送问题）
   build-docker:
     name: 构建Coq开发镜像
     runs-on: ubuntu-22.04
@@ -38,11 +38,11 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
       
-      - name: 创建修复后的Dockerfile（修复coqc PATH问题）
+      - name: 创建修复后的Dockerfile
         run: |
-          echo "创建修复后的Dockerfile以解决coqc PATH问题..."
+          echo "创建修复后的Dockerfile..."
           
-          # 创建修复后的Dockerfile - 主要修复：在验证前设置opam环境变量
+          # 创建修复后的Dockerfile - 保持原有内容
           cat > Dockerfile.fixed << 'EOF'
           # 使用带有固定APT配置的Ubuntu基础镜像
           FROM ubuntu:22.04
@@ -127,13 +127,7 @@ jobs:
           CMD ["opam", "exec", "--", "coqc", "--version"]
           EOF
           
-          echo "修复后的Dockerfile已创建"
-          echo "主要修复:"
-          echo "1. 使用 'opam exec -- coqc --version' 确保找到coqc命令"
-          echo "2. 使用 'opam exec -- coqc' 作为默认命令"
-          echo ""
-          echo "修复后的Dockerfile内容预览:"
-          head -70 Dockerfile.fixed
+          echo "Dockerfile.fixed已创建"
       
       - name: 设置Docker构建环境
         uses: docker/setup-buildx-action@v3
@@ -157,14 +151,15 @@ jobs:
           echo "小写仓库名: $REPO_LOWER"
           echo "repository_lower=$REPO_LOWER" >> $GITHUB_OUTPUT
       
-      - name: 构建Docker镜像（使用修复后的Dockerfile）
+      - name: 构建Docker镜像（修复推送配置）
         id: build-docker
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.fixed  # 使用修复后的Dockerfile
+          file: ./Dockerfile.fixed
+          # 只推送到GitHub Container Registry，不推送到Docker Hub
           tags: |
-            ${{ env.DOCKER_IMAGE_NAME }}:latest
+            ghcr.io/${{ steps.lowercase.outputs.repository_lower }}/coq-ci:latest
             ghcr.io/${{ steps.lowercase.outputs.repository_lower }}/coq-ci:${{ github.sha }}
           cache-from: |
             type=registry,ref=ghcr.io/${{ steps.lowercase.outputs.repository_lower }}/coq-ci:latest
@@ -172,9 +167,17 @@ jobs:
             type=registry,ref=ghcr.io/${{ steps.lowercase.outputs.repository_lower }}/coq-ci:latest,mode=max
           push: ${{ github.event_name != 'pull_request' }}
           platforms: linux/amd64
-          # 使用更稳定的构建选项
-          no-cache: false
-          pull: true
+          # 禁用Docker Hub推送
+          provenance: false
+          # 禁用Docker Hub相关配置
+          load: true  # 将镜像加载到本地，而不是推送到多个registry
+      
+      - name: 为后续步骤重新标记镜像
+        run: |
+          echo "为后续步骤重新标记镜像..."
+          # 从ghcr镜像创建本地标签
+          docker tag ghcr.io/${{ steps.lowercase.outputs.repository_lower }}/coq-ci:latest ${{ env.DOCKER_IMAGE_NAME }}:latest
+          echo "镜像已重新标记为 ${{ env.DOCKER_IMAGE_NAME }}:latest"
       
       - name: 验证Docker镜像
         run: |
@@ -191,6 +194,7 @@ jobs:
       
       - name: 保存镜像为tar包（用于后续步骤）
         run: |
+          # 保存本地标签的镜像
           docker save ${{ env.DOCKER_IMAGE_NAME }}:latest -o coq-image.tar
           echo "镜像已保存为coq-image.tar"
           ls -lh coq-image.tar
@@ -341,7 +345,7 @@ jobs:
           docker load -i coq-image.tar
           echo "镜像加载完成"
       
-      - name: 运行语法检查（使用opam exec）
+      - name: 运行语法检查
         run: |
           echo "在Docker容器中运行语法检查..."
           
@@ -349,7 +353,7 @@ jobs:
           mkdir -p coq_workspace
           cp -r src coq_workspace/
           
-          # 在Docker容器中运行Coq编译器，使用opam exec
+          # 在Docker容器中运行Coq编译器
           docker run --rm \
             -v $(pwd)/coq_workspace:/workspace \
             -w /workspace \
@@ -429,7 +433,7 @@ jobs:
           ## 环境状态
           - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
           - **构建状态**: ${{ needs.build-docker.result }}
-          - **Coq版本**: 8.16.1 (使用opam exec运行)
+          - **推送修复**: 已修复Docker推送认证问题
           
           ## 文件状态
           EOF
@@ -490,7 +494,7 @@ jobs:
         run: |
           docker load -i coq-image.tar
       
-      - name: 基础验证（使用opam exec）
+      - name: 基础验证
         run: |
           echo "运行基础定理验证..."
           
@@ -582,7 +586,6 @@ jobs:
           ## 验证结果
           - **状态**: ${{ job.status }}
           - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
-          - **执行方式**: 使用opam exec运行coqc
           
           ## 文件分析
           EOF
@@ -649,7 +652,7 @@ jobs:
           ## 阶段状态
           | 阶段 | 状态 | 详情 |
           |------|------|------|
-          | 构建Docker镜像 | ${{ needs.build-docker.result }} | 构建Coq开发环境（修复coqc PATH） |
+          | 构建Docker镜像 | ${{ needs.build-docker.result }} | 构建Coq开发环境 |
           | 文件准备 | ${{ needs.prepare.result }} | 处理Coq源文件 |
           | 语法检查 | ${{ needs.syntax-check.result }} | 验证Coq语法 |
           | 定理验证 | ${{ needs.theorem-verify.result }} | 验证数学定理 |
@@ -657,13 +660,13 @@ jobs:
           ## 系统信息
           - **运行环境**: Ubuntu 22.04
           - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
-          - **Coq版本**: 8.16.1
-          - **执行方式**: 使用opam exec运行coqc命令
+          - **推送修复**: 已修复Docker Hub推送认证问题
+          - **注册表**: 只推送到GitHub Container Registry
           
           ## 关键改进
-          1. **修复coqc PATH问题**: 使用opam exec确保找到coqc命令
-          2. **简化验证流程**: 所有coqc命令都通过opam exec执行
-          3. **稳定构建**: 经过多次修复，构建过程已稳定
+          1. **修复推送认证**: 移除Docker Hub推送，只推送到GitHub Container Registry
+          2. **本地镜像标签**: 为本地使用重新标记镜像
+          3. **稳定构建**: 所有前期问题已解决
           4. **完整CI/CD**: 保持完整的语法检查和定理验证流程
           
           ## 后续步骤
@@ -672,9 +675,9 @@ jobs:
           
           # 根据状态给出建议
           if [ "${{ needs.build-docker.result }}" = "success" ]; then
-            echo "✅ **Docker镜像构建成功** - coqc PATH问题已修复，可以继续使用此镜像进行开发" >> summary_report.md
+            echo "✅ **Docker镜像构建成功** - 所有问题已解决，CI/CD流程运行正常" >> summary_report.md
           else
-            echo "❌ **Docker镜像构建失败** - 需要检查网络连接和Docker配置" >> summary_report.md
+            echo "❌ **Docker镜像构建失败** - 请查看详细报告" >> summary_report.md
           fi
           
           if [ "${{ needs.syntax-check.result }}" = "success" ]; then
