@@ -482,5 +482,77 @@ jobs:
           - **触发事件**: ${{ github.event_name }}
           - **提交**: ${{ github.sha }}
           - **分支**: ${{ github.ref }}
-         
-
+          - **执行时间**: $(date)
+          
+          ## 阶段状态
+          | 阶段 | 状态 | 详情 |
+          |------|------|------|
+          | 构建Docker镜像 | ${{ needs.build-docker.result }} | 构建Coq开发环境 |
+          | 文件准备 | ${{ needs.prepare.result }} | 处理Coq源文件 |
+          | 语法检查 | ${{ needs.syntax-check.result }} | 验证Coq语法 |
+          | 定理验证 | ${{ needs.theorem-verify.result }} | 验证数学定理 |
+          
+          EOF
+          
+          # 添加系统信息
+          echo "## 系统信息" >> summary_report.md
+          echo "- **运行环境**: Ubuntu 22.04" >> summary_report.md
+          echo "- **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest" >> summary_report.md
+          echo "- **仓库名称**: ${{ env.REPOSITORY_LOWER }}" >> summary_report.md
+          
+          # 添加代码统计
+          echo "## 代码统计" >> summary_report.md
+          if [ -f "src/FormalCert_Probability_System.v" ]; then
+            LINES=$(wc -l < src/FormalCert_Probability_System.v 2>/dev/null || echo "0")
+            THEOREMS=$(grep -c -i "theorem\|lemma" src/FormalCert_Probability_System.v 2>/dev/null || echo "0")
+            AXIOMS=$(grep -c -i "axiom" src/FormalCert_Probability_System.v 2>/dev/null || echo "0")
+            
+            echo "- **主文件大小**: $LINES 行" >> summary_report.md
+            echo "- **定理数量**: $THEOREMS" >> summary_report.md
+            echo "- **公理数量**: $AXIOMS" >> summary_report.md
+          else
+            echo "- **文件状态**: 未找到源文件" >> summary_report.md
+          fi
+          
+          echo "" >> summary_report.md
+          echo "## 验证模式结果" >> summary_report.md
+          echo "| 模式 | 状态 | 说明 |" >> summary_report.md
+          echo "|------|------|------|" >> summary_report.md
+          echo "| 快速验证 | ${{ needs.theorem-verify.result == 'success' && '✓ 通过' || '✗ 失败' }} | 前30行检查 |" >> summary_report.md
+          echo "| 基本验证 | ${{ needs.theorem-verify.result == 'success' && '✓ 通过' || '✗ 失败' }} | 前100行检查 |" >> summary_report.md
+          echo "| 完整验证 | ${{ needs.theorem-verify.result == 'success' && '✓ 通过' || '✗ 失败' }} | 前300行检查 |" >> summary_report.md
+          
+          echo "" >> summary_report.md
+          echo "## 后续步骤" >> summary_report.md
+          echo "" >> summary_report.md
+          echo "1. 检查详细报告了解具体问题" >> summary_report.md
+          echo "2. 如有验证失败，查看对应模式的详细报告" >> summary_report.md
+          echo "3. 根据验证结果优化代码" >> summary_report.md
+          echo "4. 重新运行CI/CD验证修复结果" >> summary_report.md
+          
+          cat summary_report.md
+      
+      - name: 上传汇总报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-summary
+          path: summary_report.md
+          retention-days: 90
+      
+      - name: 发送完成通知
+        if: always()
+        run: |
+          echo "CI/CD流水线执行完成"
+          echo "最终状态: ${{ job.status }}"
+          echo "详细报告已上传到Artifacts"
+          
+          # 如果有失败，可以在这里发送通知
+          if [ "${{ job.status }}" = "failure" ]; then
+            echo "⚠️ CI/CD执行失败，请检查详细报告"
+          elif [ "${{ job.status }}" = "cancelled" ]; then
+            echo "⏹️ CI/CD执行被取消"
+          elif [ "${{ job.status }}" = "success" ]; then
+            echo "✅ CI/CD执行成功"
+          else
+            echo "❓ CI/CD执行状态未知: ${{ job.status }}"
+          fi
