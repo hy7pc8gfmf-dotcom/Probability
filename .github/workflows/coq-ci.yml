@@ -24,7 +24,7 @@ env:
   OPAMROOT: /usr/local/opam
 
 jobs:
-  # 阶段1: 构建Docker镜像（移除MathComp安装，专注核心Coq）
+  # 阶段1: 构建Docker镜像（修复coqc PATH问题）
   build-docker:
     name: 构建Coq开发镜像
     runs-on: ubuntu-22.04
@@ -38,11 +38,11 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
       
-      - name: 创建修复后的Dockerfile（移除MathComp安装）
+      - name: 创建修复后的Dockerfile（修复coqc PATH问题）
         run: |
-          echo "创建修复后的Dockerfile，移除MathComp安装..."
+          echo "创建修复后的Dockerfile以解决coqc PATH问题..."
           
-          # 创建修复后的Dockerfile - 移除MathComp安装，专注核心Coq
+          # 创建修复后的Dockerfile - 主要修复：在验证前设置opam环境变量
           cat > Dockerfile.fixed << 'EOF'
           # 使用带有固定APT配置的Ubuntu基础镜像
           FROM ubuntu:22.04
@@ -120,21 +120,20 @@ jobs:
           # 设置工作目录
           WORKDIR /workspace
           
-          # 验证Coq安装
-          RUN coqc --version
+          # 验证Coq安装 - 使用opam exec确保找到coqc
+          RUN opam exec -- coqc --version
           
-          # 设置默认命令
-          CMD ["coqc", "--version"]
+          # 设置默认命令 - 使用opam exec确保找到coqc
+          CMD ["opam", "exec", "--", "coqc", "--version"]
           EOF
           
           echo "修复后的Dockerfile已创建"
-          echo "主要修改:"
-          echo "1. 移除了MathComp安装步骤，避免包名问题"
-          echo "2. 只安装核心Coq 8.16.1，确保环境稳定"
-          echo "3. 保持了所有必要的系统依赖"
+          echo "主要修复:"
+          echo "1. 使用 'opam exec -- coqc --version' 确保找到coqc命令"
+          echo "2. 使用 'opam exec -- coqc' 作为默认命令"
           echo ""
           echo "修复后的Dockerfile内容预览:"
-          head -60 Dockerfile.fixed
+          head -70 Dockerfile.fixed
       
       - name: 设置Docker构建环境
         uses: docker/setup-buildx-action@v3
@@ -184,9 +183,9 @@ jobs:
           # 测试镜像是否能运行
           docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest echo "Docker镜像测试成功"
           
-          # 检查Coq是否安装
-          docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest which coqc && echo "✓ coqc已安装" || echo "✗ coqc未安装"
-          docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest coqc --version || echo "无法获取coqc版本"
+          # 检查Coq是否安装 - 使用opam exec
+          docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest opam exec -- which coqc && echo "✓ coqc已安装" || echo "✗ coqc未安装"
+          docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest opam exec -- coqc --version || echo "无法获取coqc版本"
           
           echo "Docker镜像验证完成"
       
@@ -342,7 +341,7 @@ jobs:
           docker load -i coq-image.tar
           echo "镜像加载完成"
       
-      - name: 运行语法检查
+      - name: 运行语法检查（使用opam exec）
         run: |
           echo "在Docker容器中运行语法检查..."
           
@@ -350,7 +349,7 @@ jobs:
           mkdir -p coq_workspace
           cp -r src coq_workspace/
           
-          # 在Docker容器中运行Coq编译器
+          # 在Docker容器中运行Coq编译器，使用opam exec
           docker run --rm \
             -v $(pwd)/coq_workspace:/workspace \
             -w /workspace \
@@ -359,8 +358,8 @@ jobs:
               echo '=== Coq环境检查 ==='
               
               # 检查基本命令
-              which coqc && coqc --version || echo 'coqc未安装'
-              which coqtop && coqtop --version || echo 'coqtop未安装'
+              opam exec -- which coqc && opam exec -- coqc --version || echo 'coqc未安装'
+              opam exec -- which coqtop && opam exec -- coqtop --version || echo 'coqtop未安装'
               
               echo '=== 文件检查 ==='
               ls -la /workspace/src/
@@ -384,12 +383,12 @@ jobs:
                   Proof. exact I. Qed.
                   TESTEOF
                   
-                  if coqc test_simple.v; then
+                  if opam exec -- coqc test_simple.v; then
                     echo '✓ Coq环境正常'
                     
                     # 尝试编译实际文件的前50行
                     head -50 FormalCert_Probability_System.v > test_actual.v
-                    if coqc -q test_actual.v 2>&1; then
+                    if opam exec -- coqc -q test_actual.v 2>&1; then
                       echo '✓ 语法检查通过'
                     else
                       echo '⚠️ 文件可能有语法错误或缺少依赖'
@@ -430,7 +429,7 @@ jobs:
           ## 环境状态
           - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
           - **构建状态**: ${{ needs.build-docker.result }}
-          - **Coq版本**: 8.16.1 (核心安装，未包含MathComp)
+          - **Coq版本**: 8.16.1 (使用opam exec运行)
           
           ## 文件状态
           EOF
@@ -491,7 +490,7 @@ jobs:
         run: |
           docker load -i coq-image.tar
       
-      - name: 基础验证
+      - name: 基础验证（使用opam exec）
         run: |
           echo "运行基础定理验证..."
           
@@ -514,8 +513,8 @@ jobs:
                 echo '验证前100行...'
                 head -100 FormalCert_Probability_System.v > verify_100.v
                 
-                # 设置超时
-                timeout 300s coqc -q verify_100.v 2>&1 | tee verify_output.txt
+                # 设置超时，使用opam exec
+                timeout 300s opam exec -- coqc -q verify_100.v 2>&1 | tee verify_output.txt
                 
                 VERIFY_EXIT=\${PIPESTATUS[0]}
                 
@@ -540,7 +539,7 @@ jobs:
                     sed -n \"\${START},\${END}p\" FormalCert_Probability_System.v > theorem_test.v
                     
                     echo '尝试编译单个定理...'
-                    if coqc -q theorem_test.v 2>&1; then
+                    if opam exec -- coqc -q theorem_test.v 2>&1; then
                       echo '✓ 单个定理验证通过'
                     else
                       echo '⚠️ 单个定理验证失败'
@@ -583,6 +582,7 @@ jobs:
           ## 验证结果
           - **状态**: ${{ job.status }}
           - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
+          - **执行方式**: 使用opam exec运行coqc
           
           ## 文件分析
           EOF
@@ -649,7 +649,7 @@ jobs:
           ## 阶段状态
           | 阶段 | 状态 | 详情 |
           |------|------|------|
-          | 构建Docker镜像 | ${{ needs.build-docker.result }} | 构建Coq开发环境（核心安装） |
+          | 构建Docker镜像 | ${{ needs.build-docker.result }} | 构建Coq开发环境（修复coqc PATH） |
           | 文件准备 | ${{ needs.prepare.result }} | 处理Coq源文件 |
           | 语法检查 | ${{ needs.syntax-check.result }} | 验证Coq语法 |
           | 定理验证 | ${{ needs.theorem-verify.result }} | 验证数学定理 |
@@ -657,12 +657,12 @@ jobs:
           ## 系统信息
           - **运行环境**: Ubuntu 22.04
           - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
-          - **Coq版本**: 8.16.1 (核心安装)
-          - **MathComp**: 未安装（避免包名问题）
+          - **Coq版本**: 8.16.1
+          - **执行方式**: 使用opam exec运行coqc命令
           
           ## 关键改进
-          1. **简化Dockerfile**: 移除了MathComp安装，避免包名问题
-          2. **专注核心功能**: 只安装Coq核心和必要系统依赖
+          1. **修复coqc PATH问题**: 使用opam exec确保找到coqc命令
+          2. **简化验证流程**: 所有coqc命令都通过opam exec执行
           3. **稳定构建**: 经过多次修复，构建过程已稳定
           4. **完整CI/CD**: 保持完整的语法检查和定理验证流程
           
@@ -672,7 +672,7 @@ jobs:
           
           # 根据状态给出建议
           if [ "${{ needs.build-docker.result }}" = "success" ]; then
-            echo "✅ **Docker镜像构建成功** - 核心Coq环境已就绪，可以继续使用此镜像进行开发" >> summary_report.md
+            echo "✅ **Docker镜像构建成功** - coqc PATH问题已修复，可以继续使用此镜像进行开发" >> summary_report.md
           else
             echo "❌ **Docker镜像构建失败** - 需要检查网络连接和Docker配置" >> summary_report.md
           fi
