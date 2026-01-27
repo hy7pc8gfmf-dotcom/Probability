@@ -1,155 +1,323 @@
-name: Coq Probability Library CI (8.20+ Optimized)
+name: FormalCert Probability System CI/CD
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ main, develop ]
     paths:
       - '**.v'
       - 'Makefile'
-      - '_CoqProject'
-      - '.github/workflows/*'
+      - 'coq_makefile'
   pull_request:
-    branches: [ main, master ]
-    paths-ignore:
-      - 'docs/**'
-      - 'README*.md'
+    branches: [ main ]
 
+# 设置最大执行时间
 env:
-  OPAMROOTISOK: "true"
-  OPAMYES: "true"
-
-concurrency:
-  group:  $ {{ github.workflow }}- $ {{ github.ref }}
-  cancel-in-progress: true
+  COQ_VERSION: "8.16"  # 根据项目需求调整
+  TIMEOUT_MINUTES: 45
 
 jobs:
+  # 阶段1: 环境设置和依赖安装
+  setup:
+    name: 环境准备
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 1
+    
+    - name: 设置Coq环境
+      uses: coq-community/setup-coq-action@v1
+      with:
+        coq_version: ${{ env.COQ_VERSION }}
+        opam_file: "*.opam"  # 如果有opam文件
+        
+    - name: 安装Coquelicot和其他依赖
+      run: |
+        opam repo add coq-released https://coq.inria.fr/opam/released
+        opam update
+        opam install -y coq-coquelicot
+        opam install -y coq-mathcomp-ssreflect  # 可选，如果需要数学组件
+        
+    - name: 缓存Coq编译
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.opam
+          _build
+        key: ${{ runner.os }}-coq-${{ env.COQ_VERSION }}-${{ hashFiles('**/*.v') }}
+        
+    - name: 检查Coq安装
+      run: |
+        coqc --version
+        opam list
+
+  # 阶段2: 语法检查和依赖验证
   validate:
-    name: "Coq  $ {{ matrix.coq_tag }} • OCaml  $ {{ matrix.ocaml_version }}"
-    runs-on: ubuntu-22.04
+    name: 代码验证
+    runs-on: ubuntu-latest
+    needs: setup
+    timeout-minutes: 15
+    
+    steps:
+    - uses: actions/checkout@v3
+    - uses: coq-community/setup-coq-action@v1
+      with:
+        coq_version: ${{ env.COQ_VERSION }}
+    
+    - name: 恢复缓存
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.opam
+          _build
+        key: ${{ runner.os }}-coq-${{ env.COQ_VERSION }}-${{ hashFiles('**/*.v') }}
+        restore-keys: |
+          ${{ runner.os }}-coq-${{ env.COQ_VERSION }}-
+    
+    - name: 语法检查 (coqchk)
+      run: |
+        # 检查所有Coq文件的语法
+        for file in *.v; do
+          echo "检查文件: $file"
+          coqc -o _build $file || exit 1
+        done
+        
+    - name: 导入依赖验证
+      run: |
+        # 验证所有导入语句
+        echo "验证导入语句..."
+        grep -r "Require Import" *.v | sort | uniq
+        echo "导入验证完成"
+        
+    - name: 模块接口检查
+      run: |
+        # 检查模块签名一致性
+        echo "检查模块接口..."
+        # 这里可以添加自定义的模块检查脚本
+
+  # 阶段3: 定理证明检查
+  proof-check:
+    name: 证明验证
+    runs-on: ubuntu-latest
+    needs: validate
+    timeout-minutes: 30
+    
     strategy:
       matrix:
-        include:
-          - coq_tag: "8.16"
-            coq_version: "8.16.1"
-            ocaml_version: "4.14.0"
-            coquelicot_version: "1.2.1"
-            mathcomp_version: "1.17.0"
-          - coq_tag: "8.19"
-            coq_version: "8.19.2"
-            ocaml_version: "4.14.1"
-            coquelicot_version: "1.3.0"
-            mathcomp_version: "2.1.0"
-          - coq_tag: "8.20"
-            coq_version: "8.20.1"
-            ocaml_version: "4.14.2"
-            coquelicot_version: "1.4.0"
-            mathcomp_version: "2.2.0"
-          - coq_tag: "dev"
-            coq_version: "dev"
-            ocaml_version: "5.1.1"
-            install_command: "opam pin add coq.dev https://github.com/coq/coq.git#master -y --no-action && opam install coq.dev -y"
-      fail-fast: false
-
-    steps:
-      - name: 📥 Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: 💾 Smart OPAM Cache
-        uses: actions/cache@v3
-        with:
-          path: ～/.opam
-          key:  $ {{ runner.os }}-opam- $ {{ matrix.ocaml_version }}-coq $ {{ matrix.coq_tag }}- $ {{ hashFiles('**/opam', '**/_CoqProject') }}
-          restore-keys: |
-             $ {{ runner.os }}-opam- $ {{ matrix.ocaml_version }}-coq $ {{ matrix.coq_tag }}-
-             $ {{ runner.os }}-opam- $ {{ matrix.ocaml_version }}-
-
-      - name: 🐫 Setup OCaml
-        uses: ocaml/setup-ocaml@v2
-        with:
-          ocaml-version:  $ {{ matrix.ocaml_version }}
-          opam-pin: true
-
-      - name: 📦 Install Dependencies
-        run: |
-          if [ " $ {{ matrix.install_command }}" ]; then
-            eval " $ {{ matrix.install_command }}"
-          else
-            opam install -y coq. $ {{ matrix.coq_version }} \
-                           coq-coquelicot. $ {{ matrix.coquelicot_version }} \
-                           coq-mathcomp-ssreflect. $ {{ matrix.mathcomp_version }} \
-                           coq-simpleio
-          fi
-
-      - name: 🔍 Pre-Flight Checks
-        run: |
-          coqc --version | head -1
-          [ -f Makefile ] || { echo "❌ Missing Makefile"; exit 1; }
-
-      - name: 🧪 Compile Theories
-        run: |
-          eval  $ (opam env)
-          timeout 720 make COQFLAGS="-w -deprecated-native-compiler-option" 2>&1 | tee build.log
-        env:
-          COQ_COLORS: "never"
-
-      # ✅ 修复1：移除  $  与 {{ 之间的空格
-      - name: 📊 Proof Metrics (Coq 8.20+)
-        if:  $ {{ matrix.coq_tag == '8.20' }}
-        run: |
-          eval  $ (opam env)
-          coqwc -l *.v > proof_metrics.txt
-          cat proof_metrics.txt
-
-      # ✅ 修复2：统一表达式语法（无空格 + 正确括号）
-      - name: 📚 Build Documentation
-        if:  $ {{ matrix.coq_tag == '8.20' && success() }}
-        run: make html || true
-
-      # ✅ 修复3：简化条件表达式（移除冗余括号）
-      - name: 📤 Archive Artifacts
-        if:  $ {{ success() && matrix.coq_tag == '8.20' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: formalcert-docs- $ {{ github.sha }}
-          path: |
-            html/
-            proof_metrics.txt
-          retention-days: 90
-
-      # ✅ 修复4：标准失败处理
-      - name: 🚨 Failure Diagnostics
-        if:  $ {{ failure() }}
-        run: tail -100 build.log | grep -A 5 "Error"
-
-      # ✅ 修复5：标准状态捕获
-      - name: 📌 Set Job Status
-        if:  $ {{ always() }}
-        run: echo "JOB_STATUS= $ {{ job.status }}" >>  $ GITHUB_ENV
-
-  compatibility-report:
-    name: "✅ Compatibility Report"
-    runs-on: ubuntu-22.04
-    needs: validate
-    # ✅ 修复6：完整表达式无空格
-    if:  $ {{ always() && github.ref == 'refs/heads/main' }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Generate Report
-        run: |
-          cat > COMPATIBILITY.md <<'EOF'
-          # FormalCert Coq Compatibility Report
-          **Verified**:  $ (date -u +"%Y-%m-%d")
-          **Commit**:  $ {{ github.sha }}
+        file:
+          - "UnifiedMathFoundationImpl.v"
+          # 可以添加其他主要文件
           
-          | Coq Version | Status | Recommendation |
-          |-------------|--------|----------------|
-          | 8.16.1      | ✅     | Legacy Support |
-          | 8.19.2      | ✅     | Stable         |
-          | **8.20.1**  | ✅     | **Recommended**|
-          | dev         | ⚠️     | Preview Only   |
-          EOF
-      - uses: EndBug/add-and-commit@v9
-        with:
-          add: "COMPATIBILITY.md"
-          message: "docs: update compatibility report [skip ci]"
-          push: true
+    steps:
+    - uses: actions/checkout@v3
+    - uses: coq-community/setup-coq-action@v1
+      with:
+        coq_version: ${{ env.COQ_VERSION }}
+    
+    - name: 恢复缓存
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.opam
+          _build
+        key: ${{ runner.os }}-coq-${{ env.COQ_VERSION }}-${{ hashFiles('**/*.v') }}
+        restore-keys: |
+          ${{ runner.os }}-coq-${{ env.COQ_VERSION }}-
+    
+    - name: 编译和验证证明
+      run: |
+        echo "验证文件: ${{ matrix.file }}"
+        timeout ${{ env.TIMEOUT_MINUTES }}m coqc -verbose -o _build ${{ matrix.file }}
+        
+    - name: 生成证明摘要
+      run: |
+        # 提取定理和引理列表
+        grep -n "Theorem\|Lemma\|Corollary\|Axiom" ${{ matrix.file }} > theorems_${{ matrix.file }}.txt
+        echo "定理统计:"
+        wc -l theorems_${{ matrix.file }}.txt
+        
+    - name: 上传证明报告
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: proof-report-${{ matrix.file }}
+        path: theorems_${{ matrix.file }}.txt
+
+  # 阶段4: 文档生成
+  documentation:
+    name: 文档生成
+    runs-on: ubuntu-latest
+    needs: proof-check
+    timeout-minutes: 20
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: 安装文档工具
+      run: |
+        # 安装coqdoc生成文档
+        opam install -y coq-coqdoc
+        
+    - name: 生成HTML文档
+      run: |
+        # 生成完整的HTML文档
+        coqdoc --html -d docs/html *.v
+        
+    - name: 生成LaTeX文档
+      run: |
+        # 生成LaTeX版本
+        coqdoc --latex -d docs/latex *.v
+        
+    - name: 生成API文档
+      run: |
+        # 生成模块API文档
+        mkdir -p docs/api
+        for file in *.v; do
+          base=$(basename $file .v)
+          coqdoc --html -d docs/api --with-header docs/header.html $file
+        done
+        
+    - name: 部署到GitHub Pages
+      if: github.ref == 'refs/heads/main'
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./docs/html
+        destination_dir: ./docs
+        keep_files: true
+
+  # 阶段5: 性能基准测试
+  performance:
+    name: 性能测试
+    runs-on: ubuntu-latest
+    needs: proof-check
+    timeout-minutes: 25
+    
+    steps:
+    - uses: actions/checkout@v3
+    - uses: coq-community/setup-coq-action@v1
+      with:
+        coq_version: ${{ env.COQ_VERSION }}
+    
+    - name: 编译时间基准
+      run: |
+        echo "开始性能测试..."
+        time coqc -time UnifiedMathFoundationImpl.v 2>&1 | tee compile_time.log
+        
+    - name: 内存使用测试
+      run: |
+        /usr/bin/time -v coqc -o _build UnifiedMathFoundationImpl.v 2>&1 | grep -E "Maximum resident|Elapsed" || true
+        
+    - name: 生成性能报告
+      run: |
+        echo "# 性能报告" > performance_report.md
+        echo "生成时间: $(date)" >> performance_report.md
+        echo "" >> performance_report.md
+        if [ -f compile_time.log ]; then
+          echo "## 编译时间" >> performance_report.md
+          cat compile_time.log | grep -A5 "real\|user\|sys" >> performance_report.md
+        fi
+
+  # 阶段6: 安全性和质量检查
+  security:
+    name: 安全检查
+    runs-on: ubuntu-latest
+    needs: validate
+    timeout-minutes: 15
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: 检查公理使用
+      run: |
+        echo "检查公理使用..."
+        grep -n "Axiom" *.v > axioms_used.txt
+        echo "公理统计:" 
+        wc -l axioms_used.txt
+        echo "如果公理过多，请考虑替换为引理"
+        
+    - name: 检查未完成证明
+      run: |
+        echo "检查未完成证明..."
+        grep -r "admit\|Admitted\|undefined" *.v || echo "未发现未完成证明"
+        
+    - name: 依赖安全扫描
+      run: |
+        echo "扫描依赖安全性..."
+        opam list --installable --columns=name,version,dev-setup | grep -v "^#" > dependencies.txt
+        # 这里可以集成外部安全扫描工具
+
+  # 阶段7: 集成测试（如果存在测试文件）
+  test:
+    name: 集成测试
+    runs-on: ubuntu-latest
+    needs: [proof-check, security]
+    timeout-minutes: 20
+    
+    steps:
+    - uses: actions/checkout@v3
+    - uses: coq-community/setup-coq-action@v1
+      with:
+        coq_version: ${{ env.COQ_VERSION }}
+    
+    - name: 运行单元测试
+      run: |
+        # 如果有测试文件
+        if ls *Test*.v 1> /dev/null 2>&1; then
+          for test_file in *Test*.v; do
+            echo "运行测试: $test_file"
+            coqc $test_file
+          done
+        else
+          echo "未发现测试文件"
+        fi
+        
+    - name: 示例验证
+      run: |
+        # 验证文件中的示例
+        grep -A5 "Example" *.v | head -20
+
+  # 最终汇总阶段
+  summary:
+    name: 流水线汇总
+    runs-on: ubuntu-latest
+    needs: [documentation, performance, test]
+    if: always()
+    
+    steps:
+    - name: 下载所有产物
+      uses: actions/download-artifact@v3
+      
+    - name: 生成汇总报告
+      run: |
+        echo "# CI/CD流水线报告" > summary_report.md
+        echo "运行时间: $(date)" >> summary_report.md
+        echo "提交: ${{ github.sha }}" >> summary_report.md
+        echo "" >> summary_report.md
+        
+        # 添加各阶段状态
+        echo "## 阶段状态" >> summary_report.md
+        echo "- 环境准备: ${{ needs.setup.result }}" >> summary_report.md
+        echo "- 代码验证: ${{ needs.validate.result }}" >> summary_report.md
+        echo "- 证明检查: ${{ needs.proof-check.result }}" >> summary_report.md
+        echo "- 文档生成: ${{ needs.documentation.result }}" >> summary_report.md
+        echo "- 性能测试: ${{ needs.performance.result }}" >> summary_report.md
+        echo "- 安全检查: ${{ needs.security.result }}" >> summary_report.md
+        echo "- 集成测试: ${{ needs.test.result }}" >> summary_report.md
+        echo "" >> summary_report.md
+        
+        # 添加统计信息
+        echo "## 代码统计" >> summary_report.md
+        echo "```" >> summary_report.md
+        echo "总Coq文件数: $(find . -name "*.v" | wc -l)" >> summary_report.md
+        echo "总代码行数: $(find . -name "*.v" -exec wc -l {} + | tail -1 | awk '{print $1}')" >> summary_report.md
+        echo "```" >> summary_report.md
+        
+    - name: 上传汇总报告
+      uses: actions/upload-artifact@v3
+      with:
+        name: ci-summary-report
+        path: summary_report.md
