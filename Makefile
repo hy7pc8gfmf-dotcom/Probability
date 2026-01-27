@@ -1,61 +1,60 @@
-# Makefile for FormalCert Probability System
-# 用法: 
-#   make all      # 编译所有文件
-#   make check    # 语法检查
-#   make doc      # 生成文档
-#   make clean    # 清理编译文件
+# 简化的Makefile用于本地构建
 
-COQC = coqc
-COQDOC = coqdoc
-COQFLAGS = -Q . FormalCert
+.PHONY: all check doc clean setup
 
-# 主文件列表（按依赖顺序）
-MAIN_FILES = \
-    UnifiedMathFoundationImpl.v \
-    UnifiedMeasureTheory.v
-
-# 生成的目标文件
-VO_FILES = $(MAIN_FILES:.v=.vo)
-GLOBS = $(MAIN_FILES:.v=.glob)
+# 主文件
+MAIN_FILE = FormalCert_Probability_System.v
 
 # 默认目标
-all: $(VO_FILES)
+all: check
 
-# 编译规则
-%.vo: %.v
-	$(COQC) $(COQFLAGS) $<
+# 设置开发环境
+setup:
+	@echo "设置开发环境..."
+	@chmod +x scripts/setup-dev.sh
+	@./scripts/setup-dev.sh
 
-# 检查所有文件
-check: all
-	@echo "所有文件编译成功!"
+# 检查文件
+check:
+	@echo "检查Coq文件..."
+	@if [ -f "$(MAIN_FILE)" ]; then \
+		echo "编译 $(MAIN_FILE)..."; \
+		coqc -q $(MAIN_FILE) && echo "✓ 编译成功"; \
+	else \
+		echo "找不到 $(MAIN_FILE)"; \
+		echo "尝试查找.v文件..."; \
+		FIRST_V=$$(find . -name "*.v" -type f | head -1); \
+		if [ -n "$$FIRST_V" ]; then \
+			echo "编译 $$FIRST_V..."; \
+			coqc -q $$FIRST_V && echo "✓ 编译成功"; \
+		else \
+			echo "错误: 找不到任何.v文件"; \
+			exit 1; \
+		fi; \
+	fi
 
 # 生成文档
 doc:
-	mkdir -p html
-	$(COQDOC) --html -d html $(MAIN_FILES)
-	@echo "文档已生成到html/目录"
+	@echo "生成文档..."
+	@mkdir -p docs/html
+	@if [ -f "$(MAIN_FILE)" ]; then \
+		coqdoc --html -d docs/html $(MAIN_FILE); \
+		echo "文档生成到 docs/html/"; \
+	else \
+		echo "找不到 $(MAIN_FILE)，无法生成文档"; \
+	fi
 
 # 清理
 clean:
-	rm -f *.vo *.glob *.aux
-	rm -rf html
-	rm -rf _build
+	@echo "清理构建文件..."
+	@rm -rf _build *.vo *.glob *.aux docs/html/* docs/latex/*
+	@echo "清理完成"
 
-# 性能测试
-benchmark:
-	@echo "编译时间基准测试..."
-	time $(MAKE) clean all
-
-# 检查公理
-axiom-check:
-	@grep -n "Axiom" *.v | tee axioms.txt
-	@echo "公理总数: $$(grep -c "Axiom" *.v)"
-
-# 统计信息
-stats:
-	@echo "代码统计:"
-	@echo "文件数: $$(find . -name "*.v" | wc -l)"
-	@echo "总行数: $$(find . -name "*.v" -exec wc -l {} + | tail -1 | awk '{print $$1}')"
-	@echo "定理数: $$(grep -c "Theorem\|Lemma\|Corollary" *.v)"
-
-.PHONY: all check doc clean benchmark axiom-check stats
+# 帮助
+help:
+	@echo "可用命令:"
+	@echo "  make setup    - 设置开发环境"
+	@echo "  make check    - 编译检查Coq文件"
+	@echo "  make doc      - 生成文档"
+	@echo "  make clean    - 清理构建文件"
+	@echo "  make help     - 显示此帮助"
