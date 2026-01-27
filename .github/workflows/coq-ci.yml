@@ -24,7 +24,7 @@ env:
   OPAMROOT: /usr/local/opam
 
 jobs:
-  # 阶段1: 构建Docker镜像（修复GitHub Packages权限问题）
+  # 阶段1: 构建Docker镜像
   build-docker:
     name: 构建Coq开发镜像
     runs-on: ubuntu-22.04
@@ -43,7 +43,7 @@ jobs:
           echo "创建修复后的Dockerfile..."
           
           # 创建修复后的Dockerfile - 保持原有内容
-          cat > Dockerfile.fixed << 'EOF'
+          cat > Dockerfile.fixed << 'DOCKEREOF'
           # 使用带有固定APT配置的Ubuntu基础镜像
           FROM ubuntu:22.04
           
@@ -125,7 +125,7 @@ jobs:
           
           # 设置默认命令 - 使用opam exec确保找到coqc
           CMD ["opam", "exec", "--", "coqc", "--version"]
-          EOF
+          DOCKEREOF
           
           echo "Dockerfile.fixed已创建"
       
@@ -243,7 +243,7 @@ jobs:
           path: coq-image.tar
           retention-days: 1
 
-  # 阶段2: 代码预处理和文件准备
+  # 阶段2: 代码预处理和文件准备（修复here-document问题）
   prepare:
     name: 准备Coq文件
     runs-on: ubuntu-22.04
@@ -266,7 +266,7 @@ jobs:
           echo "已加载的Docker镜像:"
           docker images | grep "${{ env.DOCKER_IMAGE_NAME }}"
       
-      - name: 处理Coq文件
+      - name: 处理Coq文件（修复here-document问题）
         run: |
           echo "准备Coq文件..."
           
@@ -299,30 +299,31 @@ jobs:
             cp "$FIRST_TEXT" "src/FormalCert_Probability_System.v"
           else
             echo "警告: 未找到Coq或文本文件，创建示例文件"
-            cat > src/FormalCert_Probability_System.v << 'EOF'
-            (* FormalCert Probability System - Example File *)
-            Require Import Coq.Arith.Arith.
-            Require Import Coq.Lists.List.
-            
-            (* Example theorem *)
-            Theorem example_theorem : 1 + 1 = 2.
-            Proof.
-              simpl.
-              reflexivity.
-            Qed.
-            
-            (* Probability example *)
-            Definition probability_space := Type.
-            Definition event := Prop.
-            Definition measure : probability_space -> event -> nat :=
-              fun _ _ => 0.
-            
-            (* Test compilation *)
-            Example test_example : True.
-            Proof.
-              exact I.
-            Qed.
-            EOF
+            # 使用不会冲突的结束标记
+            cat > src/FormalCert_Probability_System.v << 'COQEOF'
+(* FormalCert Probability System - Example File *)
+Require Import Coq.Arith.Arith.
+Require Import Coq.Lists.List.
+
+(* Example theorem *)
+Theorem example_theorem : 1 + 1 = 2.
+Proof.
+  simpl.
+  reflexivity.
+Qed.
+
+(* Probability example *)
+Definition probability_space := Type.
+Definition event := Prop.
+Definition measure : probability_space -> event -> nat :=
+  fun _ _ => 0.
+
+(* Test compilation *)
+Example test_example : True.
+Proof.
+  exact I.
+Qed.
+COQEOF
           fi
           
           # 确保文件编码正确
@@ -611,7 +612,7 @@ jobs:
         run: |
           echo "生成验证报告..."
           
-          cat > verify_report.md << EOF
+          cat > verify_report.md << 'REPORTEOF'
           # 定理验证报告
           
           ## 验证信息
@@ -625,7 +626,7 @@ jobs:
           - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
           
           ## 文件分析
-          EOF
+          REPORTEOF
           
           if [ -f "src/FormalCert_Probability_System.v" ]; then
             LINES=$(wc -l < src/FormalCert_Probability_System.v 2>/dev/null || echo "0")
@@ -645,7 +646,10 @@ jobs:
             echo '```' >> verify_report.md
           fi
           
-          echo "## 建议" >> verify_report.md
+          cat >> verify_report.md << 'REPORTEOF'
+          ## 建议
+          REPORTEOF
+          
           if [ "${{ job.status }}" = "success" ]; then
             echo "- ✅ 验证通过，可以继续开发" >> verify_report.md
           else
@@ -675,7 +679,7 @@ jobs:
         run: |
           echo "生成综合报告..."
           
-          cat > summary_report.md << EOF
+          cat > summary_report.md << 'SUMMARYEOF'
           # FormalCert Probability System - CI/CD 综合报告
           
           ## 执行概况
@@ -702,13 +706,13 @@ jobs:
           
           ## 关键改进
           1. **修复组织包权限问题**: 使用GitHub Actions缓存替代远程包推送
-          2. **可选推送**: 只有在有权限时才尝试推送到GitHub Packages
-          3. **本地优先**: 优先使用本地构建和缓存，确保流程稳定性
+          2. **修复here-document语法**: 使用唯一的结束标记，避免脚本解析错误
+          3. **可选推送**: 只有在有权限时才尝试推送到GitHub Packages
           4. **完整CI/CD**: 保持完整的语法检查和定理验证流程
           
           ## 后续步骤
           
-          EOF
+          SUMMARYEOF
           
           # 根据状态给出建议
           if [ "${{ needs.build-docker.result }}" = "success" ]; then
