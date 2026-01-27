@@ -44,6 +44,17 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     
+    - name: 提取Docker层缓存
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        target: coqorg/coq:8.16
+        outputs: type=cacheonly
+        cache-from: |
+          type=registry,ref=${{ env.DOCKER_CACHE_FROM }}
+        cache-to: type=inline
+    
     - name: 构建Docker镜像
       uses: docker/build-push-action@v5
       with:
@@ -52,8 +63,10 @@ jobs:
         tags: |
           ${{ env.DOCKER_IMAGE_NAME }}:latest
           ghcr.io/${{ github.repository }}/coq-ci:${{ github.sha }}
-        cache-from: type=registry,ref=${{ env.DOCKER_CACHE_FROM }}
-        cache-to: type=registry,ref=${{ env.DOCKER_CACHE_FROM }},mode=max
+        cache-from: |
+          type=registry,ref=${{ env.DOCKER_CACHE_FROM }}
+        cache-to: |
+          type=registry,ref=${{ env.DOCKER_CACHE_FROM }},mode=max
         push: ${{ github.event_name != 'pull_request' }}
     
     - name: 保存镜像为tar包（用于后续步骤）
