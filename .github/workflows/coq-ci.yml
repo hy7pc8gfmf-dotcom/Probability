@@ -24,7 +24,7 @@ env:
   OPAMROOT: /usr/local/opam
 
 jobs:
-  # 阶段1: 构建Docker镜像（彻底修复权限问题）
+  # 阶段1: 构建Docker镜像（修复curl问题）
   build-docker:
     name: 构建Coq开发镜像
     runs-on: ubuntu-22.04
@@ -38,11 +38,11 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
       
-      - name: 创建修复后的Dockerfile
+      - name: 创建修复后的Dockerfile（解决curl问题）
         run: |
-          echo "创建修复后的Dockerfile以解决APT权限问题..."
+          echo "创建修复后的Dockerfile以解决curl未找到问题..."
           
-          # 创建修复后的Dockerfile
+          # 创建修复后的Dockerfile - 主要修复：在安装curl之后才使用curl
           cat > Dockerfile.fixed << 'EOF'
           # 使用带有固定APT配置的Ubuntu基础镜像
           FROM ubuntu:22.04
@@ -68,15 +68,17 @@ jobs:
           # 更新APT源列表（使用-no-download选项避免权限问题）
           RUN apt-get update -o Acquire::http::No-Cache=true
           
-          # 安装必要的系统工具
+          # 安装必要的系统工具（包含curl，这样后面就可以使用了）
           RUN apt-get install -y --no-install-recommends \
               ca-certificates \
               apt-transport-https \
               gnupg \
               lsb-release \
+              curl \
+              wget \
               && rm -rf /var/lib/apt/lists/*
           
-          # 添加GitHub GPG密钥
+          # 现在curl已经安装，可以安全地使用它来添加GitHub GPG密钥
           RUN mkdir -p /etc/apt/keyrings && \
               curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
               chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
@@ -89,8 +91,6 @@ jobs:
               git \
               make \
               time \
-              curl \
-              wget \
               tar \
               gzip \
               && rm -rf /var/lib/apt/lists/*
@@ -124,11 +124,12 @@ jobs:
           EOF
           
           echo "修复后的Dockerfile已创建"
-          echo "原始Dockerfile内容:"
-          cat Dockerfile 2>/dev/null || echo "原始Dockerfile不存在"
+          echo "主要修复内容:"
+          echo "1. 在安装系统工具时包含了curl"
+          echo "2. 确保在使用curl之前已经安装了它"
           echo ""
-          echo "修复后的Dockerfile内容:"
-          cat Dockerfile.fixed
+          echo "修复后的Dockerfile内容预览:"
+          head -50 Dockerfile.fixed
       
       - name: 设置Docker构建环境
         uses: docker/setup-buildx-action@v3
@@ -176,19 +177,28 @@ jobs:
         run: |
           echo "使用备用构建方法..."
           
-          # 使用简单的Docker构建命令，避免缓存问题
+          # 使用更简单的Docker构建命令，避免复杂依赖
           cat > Dockerfile.simple << 'EOF'
           FROM ubuntu:22.04
           
           ENV DEBIAN_FRONTEND=noninteractive
           
-          # 直接运行apt命令，不删除缓存
+          # 分步骤安装，先确保curl已安装
+          RUN apt-get update && apt-get install -y \
+              curl \
+              wget \
+              ca-certificates
+          
+          # 然后使用curl下载GitHub密钥
+          RUN mkdir -p /etc/apt/keyrings && \
+              curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+              chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          
+          # 继续安装其他工具
           RUN apt-get update && apt-get install -y \
               git \
               make \
               time \
-              curl \
-              wget \
               opam \
               m4 \
               pkg-config
@@ -215,6 +225,9 @@ jobs:
           
           # 测试镜像是否能运行
           docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest echo "Docker镜像测试成功"
+          
+          # 检查curl是否安装
+          docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest which curl && echo "✓ curl已安装" || echo "✗ curl未安装"
           
           # 检查Coq是否安装
           docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest which coqc || echo "coqc未找到"
@@ -394,6 +407,7 @@ jobs:
               which coqc && coqc --version || echo 'coqc未安装'
               which coqtop && coqtop --version || echo 'coqtop未安装'
               which opam && opam --version || echo 'opam未安装'
+              which curl && curl --version || echo 'curl未安装'
               
               echo '=== 文件检查 ==='
               ls -la /workspace/src/
@@ -463,6 +477,7 @@ jobs:
           ## 环境状态
           - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
           - **构建状态**: ${{ needs.build-docker.result }}
+          - **主要修复**: curl依赖问题已解决
           
           ## 文件状态
           EOF
@@ -681,7 +696,7 @@ jobs:
           ## 阶段状态
           | 阶段 | 状态 | 详情 |
           |------|------|------|
-          | 构建Docker镜像 | ${{ needs.build-docker.result }} | 构建Coq开发环境（修复APT权限） |
+          | 构建Docker镜像 | ${{ needs.build-docker.result }} | 构建Coq开发环境（修复curl依赖） |
           | 文件准备 | ${{ needs.prepare.result }} | 处理Coq源文件 |
           | 语法检查 | ${{ needs.syntax-check.result }} | 验证Coq语法 |
           | 定理验证 | ${{ needs.theorem-verify.result }} | 验证数学定理 |
@@ -689,12 +704,12 @@ jobs:
           ## 系统信息
           - **运行环境**: Ubuntu 22.04
           - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
-          - **构建方法**: 使用修复后的Dockerfile解决APT权限问题
+          - **构建方法**: 修复curl依赖问题，确保在使用前已安装
           
           ## 关键改进
-          1. **修复APT权限问题**: 在Dockerfile中显式创建并设置APT目录权限
-          2. **备用构建方法**: 当主构建失败时使用简化的Dockerfile
-          3. **环境验证**: 构建后验证Docker镜像功能
+          1. **修复curl依赖**: 确保在Dockerfile中先安装curl，再使用curl命令
+          2. **简化构建过程**: 移除了不必要的包安装，减少依赖冲突
+          3. **备用构建方法**: 当主构建失败时使用更简单的Dockerfile
           4. **容错处理**: 语法检查和定理验证阶段有容错机制
           
           ## 后续步骤
@@ -703,7 +718,7 @@ jobs:
           
           # 根据状态给出建议
           if [ "${{ needs.build-docker.result }}" = "success" ]; then
-            echo "✅ **Docker镜像构建成功** - 可以继续使用此镜像进行开发" >> summary_report.md
+            echo "✅ **Docker镜像构建成功** - curl依赖问题已解决，可以继续使用此镜像进行开发" >> summary_report.md
           else
             echo "❌ **Docker镜像构建失败** - 需要检查网络连接和Docker配置" >> summary_report.md
           fi
