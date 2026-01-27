@@ -24,7 +24,7 @@ env:
   OPAMROOT: /usr/local/opam
 
 jobs:
-  # 阶段1: 构建Docker镜像（修复Docker推送问题）
+  # 阶段1: 构建Docker镜像（修复GitHub Packages权限问题）
   build-docker:
     name: 构建Coq开发镜像
     runs-on: ubuntu-22.04
@@ -135,13 +135,27 @@ jobs:
           driver-opts: |
             image=moby/buildkit:master
       
-      - name: 登录到GitHub容器仓库
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 检查GitHub Packages权限
+        run: |
+          echo "检查GitHub Packages权限..."
+          echo "仓库: ${{ github.repository }}"
+          echo "仓库名称: ${{ github.repository }}"
+          echo "仓库所有者: ${{ github.repository_owner }}"
+          echo "事件: ${{ github.event_name }}"
+          
+          # 检查是否具有创建包的权限
+          if [[ "${{ github.repository }}" == *"/"* ]]; then
+            OWNER=$(echo "${{ github.repository }}" | cut -d'/' -f1)
+            REPO=$(echo "${{ github.repository }}" | cut -d'/' -f2)
+            echo "所有者: $OWNER"
+            echo "仓库名: $REPO"
+            
+            # 如果是组织仓库，可能需要特定权限
+            if [[ "$OWNER" != "${{ github.actor }}" ]]; then
+              echo "⚠️ 这是组织仓库，可能需要额外权限来创建包"
+              echo "建议：使用个人命名空间或确保有组织包创建权限"
+            fi
+          fi
       
       - name: 转换仓库名称为小写
         id: lowercase
@@ -151,33 +165,56 @@ jobs:
           echo "小写仓库名: $REPO_LOWER"
           echo "repository_lower=$REPO_LOWER" >> $GITHUB_OUTPUT
       
-      - name: 构建Docker镜像（修复推送配置）
+      - name: 构建Docker镜像（不推送，只构建和缓存）
         id: build-docker
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.fixed
-          # 只推送到GitHub Container Registry，不推送到Docker Hub
+          # 使用GitHub Actions缓存，不推送到远程仓库
           tags: |
-            ghcr.io/${{ steps.lowercase.outputs.repository_lower }}/coq-ci:latest
-            ghcr.io/${{ steps.lowercase.outputs.repository_lower }}/coq-ci:${{ github.sha }}
+            ${{ env.DOCKER_IMAGE_NAME }}:latest
           cache-from: |
-            type=registry,ref=ghcr.io/${{ steps.lowercase.outputs.repository_lower }}/coq-ci:latest
+            type=gha,scope=coq-ci
           cache-to: |
-            type=registry,ref=ghcr.io/${{ steps.lowercase.outputs.repository_lower }}/coq-ci:latest,mode=max
-          push: ${{ github.event_name != 'pull_request' }}
+            type=gha,scope=coq-ci,mode=max
+          push: false  # 不推送到远程仓库
           platforms: linux/amd64
-          # 禁用Docker Hub推送
-          provenance: false
-          # 禁用Docker Hub相关配置
-          load: true  # 将镜像加载到本地，而不是推送到多个registry
+          outputs: type=docker,dest=/tmp/coq-image.tar  # 直接输出到文件
       
-      - name: 为后续步骤重新标记镜像
+      - name: 加载Docker镜像到本地
         run: |
-          echo "为后续步骤重新标记镜像..."
-          # 从ghcr镜像创建本地标签
-          docker tag ghcr.io/${{ steps.lowercase.outputs.repository_lower }}/coq-ci:latest ${{ env.DOCKER_IMAGE_NAME }}:latest
-          echo "镜像已重新标记为 ${{ env.DOCKER_IMAGE_NAME }}:latest"
+          echo "加载Docker镜像到本地..."
+          docker load -i /tmp/coq-image.tar
+          docker tag ${{ env.DOCKER_IMAGE_NAME }}:latest coq-ci:latest
+          echo "镜像已加载并标记为 coq-ci:latest"
+          docker images | grep coq-ci
+      
+      - name: 尝试推送到GitHub Packages（可选的，如果权限允许）
+        if: github.event_name != 'pull_request'
+        continue-on-error: true  # 即使推送失败也继续
+        run: |
+          echo "尝试推送到GitHub Packages..."
+          
+          # 使用个人命名空间，避免组织权限问题
+          PERSONAL_NAMESPACE="${{ github.actor }}"
+          echo "使用个人命名空间: $PERSONAL_NAMESPACE"
+          
+          # 登录到GitHub容器仓库
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          
+          # 标记镜像
+          docker tag ${{ env.DOCKER_IMAGE_NAME }}:latest ghcr.io/$PERSONAL_NAMESPACE/coq-ci:${{ github.sha }}
+          docker tag ${{ env.DOCKER_IMAGE_NAME }}:latest ghcr.io/$PERSONAL_NAMESPACE/coq-ci:latest
+          
+          # 尝试推送
+          echo "推送镜像到 ghcr.io/$PERSONAL_NAMESPACE/coq-ci:${{ github.sha }}"
+          docker push ghcr.io/$PERSONAL_NAMESPACE/coq-ci:${{ github.sha }} || echo "推送带SHA标签失败，继续..."
+          
+          echo "推送镜像到 ghcr.io/$PERSONAL_NAMESPACE/coq-ci:latest"
+          docker push ghcr.io/$PERSONAL_NAMESPACE/coq-ci:latest || echo "推送latest标签失败，继续..."
+          
+          echo "推送完成（部分可能失败）"
       
       - name: 验证Docker镜像
         run: |
@@ -433,7 +470,7 @@ jobs:
           ## 环境状态
           - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
           - **构建状态**: ${{ needs.build-docker.result }}
-          - **推送修复**: 已修复Docker推送认证问题
+          - **权限修复**: 使用GitHub Actions缓存，避免组织包权限问题
           
           ## 文件状态
           EOF
@@ -660,13 +697,13 @@ jobs:
           ## 系统信息
           - **运行环境**: Ubuntu 22.04
           - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
-          - **推送修复**: 已修复Docker Hub推送认证问题
-          - **注册表**: 只推送到GitHub Container Registry
+          - **缓存策略**: 使用GitHub Actions缓存，避免组织包权限问题
+          - **Coq版本**: 8.16.1
           
           ## 关键改进
-          1. **修复推送认证**: 移除Docker Hub推送，只推送到GitHub Container Registry
-          2. **本地镜像标签**: 为本地使用重新标记镜像
-          3. **稳定构建**: 所有前期问题已解决
+          1. **修复组织包权限问题**: 使用GitHub Actions缓存替代远程包推送
+          2. **可选推送**: 只有在有权限时才尝试推送到GitHub Packages
+          3. **本地优先**: 优先使用本地构建和缓存，确保流程稳定性
           4. **完整CI/CD**: 保持完整的语法检查和定理验证流程
           
           ## 后续步骤
@@ -675,7 +712,7 @@ jobs:
           
           # 根据状态给出建议
           if [ "${{ needs.build-docker.result }}" = "success" ]; then
-            echo "✅ **Docker镜像构建成功** - 所有问题已解决，CI/CD流程运行正常" >> summary_report.md
+            echo "✅ **Docker镜像构建成功** - 使用GitHub Actions缓存，避免了权限问题" >> summary_report.md
           else
             echo "❌ **Docker镜像构建失败** - 请查看详细报告" >> summary_report.md
           fi
