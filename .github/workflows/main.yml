@@ -1,0 +1,118 @@
+name: Coq Probability Library CI
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - '**.v'
+      - 'Makefile'
+      - '.github/workflows/*'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - '**.v'
+      - 'Makefile'
+
+concurrency:
+  group:  $ {{ github.workflow }}- $ {{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Coq  $ {{ matrix.coq-version }} Validation
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        coq-version: ['8.16', '8.17', '8.18', '8.19']
+        include:
+          - coq-version: '8.16'
+            ocaml-version: '4.14.0'
+          - coq-version: '8.19'
+            ocaml-version: '4.14.1'
+      fail-fast: false
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 💾 Cache OPAM
+        uses: actions/cache@v3
+        with:
+          path: ～/.opam
+          key:  $ {{ runner.os }}-opam- $ {{ matrix.ocaml-version }}-coq $ {{ matrix.coq-version }}- $ {{ hashFiles('**/opam') }}
+          restore-keys: |
+             $ {{ runner.os }}-opam- $ {{ matrix.ocaml-version }}-coq $ {{ matrix.coq-version }}-
+
+      - name: 🐫 Setup OCaml & OPAM
+        uses: ocaml/setup-ocaml@v2
+        with:
+          ocaml-version:  $ {{ matrix.ocaml-version }}
+          opam-pin: true
+
+      - name: 📦 Install Dependencies
+        run: |
+          opam install -y coq. $ {{ matrix.coq-version }} coq-coquelicot
+          opam install -y coq-mathcomp-ssreflect coq-mathcomp-algebra || true
+          opam install -y coq-simpleio || true
+
+      - name: 🔍 Verify Project Structure
+        run: |
+          ls -la
+          [ -f Makefile ] && echo "✓ Makefile exists" || exit 1
+          [ -f FormalCert_Probability_System.v ] && echo "✓ Core file exists" || exit 1
+
+      - name: 🧪 Compile All Theories
+        run: |
+          eval  $ (opam env)
+          timeout 600 make 2>&1 | tee build.log
+        env:
+          COQ_COLORS: "never"
+
+      - name: 📝 Generate Proof Statistics
+        if:  $ {{ matrix.coq-version == '8.19' }}
+        run: |
+          eval  $ (opam env)
+          coqwc *.v > proof_metrics.txt
+          cat proof_metrics.txt
+
+      - name: 📚 Generate Documentation (Coq 8.19)
+        if:  $ {{ matrix.coq-version == '8.19' }}
+        run: |
+          eval  $ (opam env)
+          make doc 2>/dev/null || echo "Documentation target not configured"
+        continue-on-error: true
+
+      - name: 📤 Upload Documentation Artifact
+        if:  $ {{ matrix.coq-version == '8.19' && success() }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: formalcert-docs- $ {{ github.sha }}
+          path: doc/
+          retention-days: 30
+
+      - name: 📊 Report Build Metrics
+        if: always()
+        run: |
+          echo "=== BUILD METRICS ==="
+          echo "Coq Version:  $ {{ matrix.coq-version }}"
+          echo "Status:  $ {{ job.status }}"
+          if [ -f build.log ]; then
+            grep -E "(Error|Warning|Qed|Defined)" build.log | tail -20
+          fi
+
+  badge-update:
+    name: Update CI Status Badge
+    runs-on: ubuntu-22.04
+    needs: validate
+    if:  $ {{ github.ref == 'refs/heads/main' && needs.validate.result == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Commit badge update
+        run: |
+          git config user.name "CI Bot"
+          git config user.email "ci-bot@formalcert.org"
+          # 实际项目中可集成 shields.io 动态徽章更新
+          echo "CI status: SUCCESS" >> CI_STATUS.txt
+          git add CI_STATUS.txt
+          git commit -m "chore: update CI status [skip ci]" || echo "No changes"
+          git push origin HEAD:main || echo "Push skipped"
