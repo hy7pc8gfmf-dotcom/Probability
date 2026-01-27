@@ -95,12 +95,13 @@ jobs:
               gzip \
               && rm -rf /var/lib/apt/lists/*
           
-          # 安装Opam
+          # 安装Opam及其依赖（包括libgmp-dev，这是coq需要的）
           RUN apt-get update && apt-get install -y --no-install-recommends \
               opam \
               m4 \
               pkg-config \
               bubblewrap \
+              libgmp-dev \
               && rm -rf /var/lib/apt/lists/*
           
           # 设置Opam环境
