@@ -299,9 +299,9 @@ jobs:
             cp "$FIRST_TEXT" "src/FormalCert_Probability_System.v"
           else
             echo "警告: 未找到Coq或文本文件，创建示例文件"
-            # 修复heredocument的EOF标记 - 使用不同的结束标记避免冲突
-            cat > src/FormalCert_Probability_System.v << 'COQ_EOF'
-
+            # 修复heredocument的EOF标记问题：使用<<-移除开头的制表符
+            cat > src/FormalCert_Probability_System.v <<- 'COQ_EOF'
+            
             (* FormalCert Probability System - Example File *)
             Require Import Coq.Arith.Arith.
             Require Import Coq.Lists.List.
