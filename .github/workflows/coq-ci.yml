@@ -299,32 +299,29 @@ jobs:
             cp "$FIRST_TEXT" "src/FormalCert_Probability_System.v"
           else
             echo "警告: 未找到Coq或文本文件，创建示例文件"
-            # 修复heredocument的EOF标记问题：使用<<-移除开头的制表符
-            cat > src/FormalCert_Probability_System.v <<- 'COQ_EOF'
-            
-            (* FormalCert Probability System - Example File *)
-            Require Import Coq.Arith.Arith.
-            Require Import Coq.Lists.List.
-            
-            (* Example theorem *)
-            Theorem example_theorem : 1 + 1 = 2.
-            Proof.
-              simpl.
-              reflexivity.
-            Qed.
-            
-            (* Probability example *)
-            Definition probability_space := Type.
-            Definition event := Prop.
-            Definition measure : probability_space -> event -> nat :=
-              fun _ _ => 0.
-            
-            (* Test compilation *)
-            Example test_example : True.
-            Proof.
-              exact I.
-            Qed.
-            COQ_EOF
+            # 使用多个echo命令创建文件，完全避免here-document问题
+            echo '(* FormalCert Probability System - Example File *)' > src/FormalCert_Probability_System.v
+            echo 'Require Import Coq.Arith.Arith.' >> src/FormalCert_Probability_System.v
+            echo 'Require Import Coq.Lists.List.' >> src/FormalCert_Probability_System.v
+            echo '' >> src/FormalCert_Probability_System.v
+            echo '(* Example theorem *)' >> src/FormalCert_Probability_System.v
+            echo 'Theorem example_theorem : 1 + 1 = 2.' >> src/FormalCert_Probability_System.v
+            echo 'Proof.' >> src/FormalCert_Probability_System.v
+            echo '  simpl.' >> src/FormalCert_Probability_System.v
+            echo '  reflexivity.' >> src/FormalCert_Probability_System.v
+            echo 'Qed.' >> src/FormalCert_Probability_System.v
+            echo '' >> src/FormalCert_Probability_System.v
+            echo '(* Probability example *)' >> src/FormalCert_Probability_System.v
+            echo 'Definition probability_space := Type.' >> src/FormalCert_Probability_System.v
+            echo 'Definition event := Prop.' >> src/FormalCert_Probability_System.v
+            echo 'Definition measure : probability_space -> event -> nat :=' >> src/FormalCert_Probability_System.v
+            echo '  fun _ _ => 0.' >> src/FormalCert_Probability_System.v
+            echo '' >> src/FormalCert_Probability_System.v
+            echo '(* Test compilation *)' >> src/FormalCert_Probability_System.v
+            echo 'Example test_example : True.' >> src/FormalCert_Probability_System.v
+            echo 'Proof.' >> src/FormalCert_Probability_System.v
+            echo '  exact I.' >> src/FormalCert_Probability_System.v
+            echo 'Qed.' >> src/FormalCert_Probability_System.v
           fi
           
           # 确保文件编码正确
