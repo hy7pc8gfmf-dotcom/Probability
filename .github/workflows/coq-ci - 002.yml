@@ -1,0 +1,26 @@
+name: FormalCert Probability System - CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-trigger:
+    name: 测试触发器
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 检查触发
+      run: |
+        echo "工作流已触发！"
+        echo "事件类型: ${{ github.event_name }}"
+        echo "分支: ${{ github.ref }}"
+        echo "提交: ${{ github.sha }}"
+        echo "仓库: ${{ github.repository }}"
+        
+        echo "列出所有文件:"
+        find . -type f -name "*.v" -o -name "*.txt" | head -10
+        
+        echo "当前目录内容:"
+        ls -la
