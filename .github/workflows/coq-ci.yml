@@ -15,7 +15,16 @@ on:
 # 设置全局环境变量
 env:
   COQ_VERSION: "8.16"
-  DOCKER_IMAGE_TAG: "formalcert-coq-${{ github.run_id }}"
+  DOCKER_IMAGE_TAG: "formalcert-coq-${{ github.run_number }}"
+  # 确保镜像名全小写
+  DOCKER_REGISTRY_IMAGE: "ghcr.io/${{ github.repository_lower }}/coq-ci"
+  
+# 预处理环境变量
+env:
+  # 确保仓库名全小写
+  REPOSITORY_LOWER: "${{ github.repository }}"
+  # 转换仓库名为小写
+  REPOSITORY_LOWER: "${{ fromJSON('[\"lowercase\"]') | contains(fromJSON('[\"lowercase\"]')) ? github.repository : github.repository | lower }}"
 
 # 确保只有一个 job 运行，简化流程
 jobs:
@@ -24,16 +33,57 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     
+    # 定义 job 级别的环境变量
+    env:
+      # 强制转换为小写
+      LOWERCASE_REPO: "${{ github.repository }}"
+      LOWERCASE_REPO: "${{ format('{0}', github.repository) | lower }}"
+      # 构建镜像标签（使用 run_number 避免特殊字符）
+      IMAGE_TAG: "formalcert-coq-${{ github.run_number }}"
+      # 注册表镜像标签（全小写）
+      REGISTRY_IMAGE: "ghcr.io/${{ github.repository_owner | lower }}/${{ github.event.repository.name | lower }}/coq-ci"
+      REGISTRY_IMAGE: "ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}/coq-ci"
+      # 使用安全的小写转换
+      SAFE_REPO_NAME: "${{ github.event.repository.name }}"
+    
     steps:
     # 步骤 1: 检出代码
     - name: 检出代码
       uses: actions/checkout@v4
     
-    # 步骤 2: 设置 Docker Buildx
+    # 步骤 2: 设置环境变量（确保全小写）
+    - name: 设置环境变量
+      run: |
+        echo "原始仓库名: ${{ github.repository }}"
+        echo "仓库所有者: ${{ github.repository_owner }}"
+        echo "仓库名称: ${{ github.event.repository.name }}"
+        
+        # 手动转换为小写
+        REPO_OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+        REPO_NAME_LOWER=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+        
+        echo "小写仓库所有者: $REPO_OWNER_LOWER"
+        echo "小写仓库名称: $REPO_NAME_LOWER"
+        
+        # 设置环境变量供后续步骤使用
+        echo "REPO_OWNER_LOWER=$REPO_OWNER_LOWER" >> $GITHUB_ENV
+        echo "REPO_NAME_LOWER=$REPO_NAME_LOWER" >> $GITHUB_ENV
+        echo "REGISTRY_IMAGE=ghcr.io/$REPO_OWNER_LOWER/$REPO_NAME_LOWER/coq-ci" >> $GITHUB_ENV
+        echo "IMAGE_TAG=formalcert-coq-${{ github.run_number }}" >> $GITHUB_ENV
+    
+    # 步骤 3: 设置 Docker Buildx
     - name: 设置 Docker Buildx
       uses: docker/setup-buildx-action@v3
     
-    # 步骤 3: 检查文件结构
+    # 步骤 4: 登录到 GitHub Container Registry
+    - name: 登录到 GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    # 步骤 5: 检查文件结构
     - name: 检查文件结构
       run: |
         echo "当前目录结构:"
@@ -55,54 +105,66 @@ jobs:
           echo "Coq 文件内容预览:"
           head -20 src/FormalCert_Probability_System.v
         fi
-    
-    # 步骤 4: 构建 Docker 镜像
-    - name: 构建 Docker 镜像
-      run: |
-        echo "构建 Docker 镜像..."
         
-        # 检查 Dockerfile 是否存在
+        # 检查 Dockerfile
         if [ ! -f "Dockerfile" ]; then
           echo "创建默认 Dockerfile..."
           cat > Dockerfile << 'EOF'
-        FROM coqorg/coq:${{ env.COC_VERSION }}
-        
-        # 安装必要的工具
-        RUN apt-get update && apt-get install -y \
-            git \
-            make \
-            time \
-            python3 \
-            python3-pip \
-            && rm -rf /var/lib/apt/lists/*
-        
-        # 设置工作目录
-        WORKDIR /workspace
-        
-        # 设置环境变量
-        ENV OPAMYES=true
-        ENV OPAMROOT=/opam
-        
-        # 设置默认命令
-        CMD ["/bin/bash"]
-        EOF
+FROM coqorg/coq:8.16
+
+# 安装必要的工具
+RUN apt-get update && apt-get install -y \
+    git \
+    make \
+    time \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# 设置工作目录
+WORKDIR /workspace
+
+# 设置环境变量
+ENV OPAMYES=true
+ENV OPAMROOT=/opam
+
+# 设置默认命令
+CMD ["/bin/bash"]
+EOF
+          echo "Dockerfile 已创建"
         fi
-        
-        # 构建镜像
-        docker build \
-          --build-arg COQ_VERSION=${{ env.COC_VERSION }} \
-          -t ${{ env.DOCKER_IMAGE_TAG }} .
     
-    # 步骤 5: 语法检查
+    # 步骤 6: 构建 Docker 镜像
+    - name: 构建 Docker 镜像
+      run: |
+        echo "构建 Docker 镜像..."
+        echo "镜像标签: $IMAGE_TAG"
+        echo "注册表镜像: $REGISTRY_IMAGE:${{ github.sha }}"
+        
+        # 构建镜像并推送到 GitHub Container Registry
+        docker buildx build \
+          --platform linux/amd64 \
+          --cache-from type=registry,ref=$REGISTRY_IMAGE:latest \
+          --cache-to type=registry,ref=$REGISTRY_IMAGE:latest,mode=max \
+          -t $IMAGE_TAG \
+          -t $REGISTRY_IMAGE:${{ github.sha }} \
+          -t $REGISTRY_IMAGE:latest \
+          --push \
+          .
+        
+        echo "镜像构建并推送完成"
+    
+    # 步骤 7: 语法检查
     - name: 语法检查
       run: |
         echo "运行语法检查..."
         
         if [ -f "src/FormalCert_Probability_System.v" ]; then
+          # 使用构建的镜像运行语法检查
           docker run --rm \
             -v $(pwd):/workspace \
             -w /workspace \
-            ${{ env.DOCKER_IMAGE_TAG }} \
+            $REGISTRY_IMAGE:${{ github.sha }} \
             bash -c "
               echo '=== Coq 版本信息 ==='
               coqc --version
@@ -131,7 +193,7 @@ jobs:
           exit 1
         fi
     
-    # 步骤 6: 定理验证
+    # 步骤 8: 定理验证
     - name: 定理验证
       run: |
         echo "运行定理验证..."
@@ -139,7 +201,7 @@ jobs:
         docker run --rm \
           -v $(pwd):/workspace \
           -w /workspace \
-          ${{ env.DOCKER_IMAGE_TAG }} \
+          $REGISTRY_IMAGE:${{ github.sha }} \
           bash -c "
             if [ -f 'src/FormalCert_Probability_System.v' ]; then
               cd src
@@ -178,7 +240,7 @@ jobs:
             fi
           "
     
-    # 步骤 7: 生成文档
+    # 步骤 9: 生成文档
     - name: 生成文档
       run: |
         echo "生成文档..."
@@ -189,7 +251,7 @@ jobs:
         docker run --rm \
           -v $(pwd):/workspace \
           -w /workspace \
-          ${{ env.DOCKER_IMAGE_TAG }} \
+          $REGISTRY_IMAGE:${{ github.sha }} \
           bash -c "
             if [ -f 'src/FormalCert_Probability_System.v' ]; then
               cd src
@@ -207,53 +269,53 @@ jobs:
           "
         
         # 创建索引页面
-        cat > docs/index.html << 'EOF'
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>FormalCert Probability System</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 40px; }
-                .container { max-width: 800px; margin: 0 auto; }
-                header { border-bottom: 2px solid #333; padding-bottom: 20px; }
-                nav { margin: 20px 0; padding: 15px; background: #f5f5f5; }
-                footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <header>
-                    <h1>FormalCert Probability System</h1>
-                    <p>Formally verified probability theory in Coq</p>
-                </header>
-                
-                <nav>
-                    <h2>Documentation</h2>
-                    <ul>
-                        <li><a href="html/index.html">HTML Documentation</a></li>
-                        <li><a href="latex/FormalCert_Probability_System.tex">LaTeX Source</a></li>
-                    </ul>
-                </nav>
-                
-                <section>
-                    <h2>About</h2>
-                    <p>This project provides a formalization of probability theory in the Coq proof assistant.</p>
-                </section>
-                
-                <footer>
-                    <p>Generated on $(date)</p>
-                    <p>Commit: ${{ github.sha }}</p>
-                </footer>
-            </div>
-        </body>
-        </html>
-        EOF
+        cat > docs/index.html << EOF
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FormalCert Probability System</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        header { border-bottom: 2px solid #333; padding-bottom: 20px; }
+        nav { margin: 20px 0; padding: 15px; background: #f5f5f5; }
+        footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>FormalCert Probability System</h1>
+            <p>Formally verified probability theory in Coq</p>
+        </header>
+        
+        <nav>
+            <h2>Documentation</h2>
+            <ul>
+                <li><a href="html/index.html">HTML Documentation</a></li>
+                <li><a href="latex/FormalCert_Probability_System.tex">LaTeX Source</a></li>
+            </ul>
+        </nav>
+        
+        <section>
+            <h2>About</h2>
+            <p>This project provides a formalization of probability theory in the Coq proof assistant.</p>
+        </section>
+        
+        <footer>
+            <p>Generated on $(date)</p>
+            <p>Commit: ${{ github.sha }}</p>
+        </footer>
+    </div>
+</body>
+</html>
+EOF
         
         echo "文档已生成到 docs/ 目录"
     
-    # 步骤 8: 清理和报告
+    # 步骤 10: 生成报告
     - name: 生成报告
       if: always()
       run: |
@@ -261,18 +323,24 @@ jobs:
         
         # 创建报告文件
         cat > ci-report.md << EOF
-        # FormalCert Probability System - CI/CD 报告
-        
-        ## 基本信息
-        - 工作流: ${{ github.workflow }}
-        - 运行 ID: ${{ github.run_id }}
-        - 提交: \`${{ github.sha }}\`
-        - 分支: ${{ github.ref }}
-        - 触发事件: ${{ github.event_name }}
-        - 运行时间: $(date)
-        
-        ## 文件信息
-        EOF
+# FormalCert Probability System - CI/CD 报告
+
+## 基本信息
+- 工作流: ${{ github.workflow }}
+- 运行 ID: ${{ github.run_id }}
+- 运行编号: ${{ github.run_number }}
+- 提交: \`${{ github.sha }}\`
+- 分支: ${{ github.ref }}
+- 触发事件: ${{ github.event_name }}
+- 运行时间: $(date)
+
+## 镜像信息
+- 本地镜像标签: $IMAGE_TAG
+- 注册表镜像: $REGISTRY_IMAGE:${{ github.sha }}
+- Coq 版本: ${{ env.COC_VERSION }}
+
+## 文件信息
+EOF
         
         # 添加文件信息
         if [ -f "src/FormalCert_Probability_System.v" ]; then
@@ -314,12 +382,12 @@ jobs:
         # 显示报告
         cat ci-report.md
     
-    # 步骤 9: 上传产物
+    # 步骤 11: 上传产物
     - name: 上传产物
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-artifacts
+        name: build-artifacts-${{ github.run_number }}
         path: |
           src/*.vo
           src/*.glob
@@ -327,7 +395,7 @@ jobs:
           ci-report.md
         retention-days: 7
     
-    # 步骤 10: 部署文档到 GitHub Pages (仅 main 分支)
+    # 步骤 12: 部署文档到 GitHub Pages (仅 main 分支)
     - name: 部署文档
       if: github.ref == 'refs/heads/main' && success()
       uses: peaceiris/actions-gh-pages@v4
