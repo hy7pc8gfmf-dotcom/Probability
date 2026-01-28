@@ -31,6 +31,11 @@ Require Import Coq.Init.Prelude.              (* 基础核心库 *)
 Require Import Coq.micromega.Lra.
 From Coq Require Import Lia.
   
+Set Warnings "-deprecated".
+Set Warnings "-warn-library-file-stdlib-vector".
+Set Warnings "-deprecated-syntactic-definition-since-8.17".
+Set Warnings "-renaming-var-with-dup-name-in-binder".
+  
 (* ================================================================= *)
 (* 第一部分：模块类型定义 (Interface/Signature) *)
 (* UnifiedMathFoundationSig - 定义数学基础系统的接口 *)
