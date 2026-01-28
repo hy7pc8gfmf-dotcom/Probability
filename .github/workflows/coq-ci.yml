@@ -105,6 +105,8 @@ jobs:
               libgmp-dev \
               # 其他常见的Coq依赖
               g++ \
+              # clang编译器（coq-coquelicot依赖）
+              clang \
               # 数学库依赖
               liblapack-dev \
               libopenblas-dev \
