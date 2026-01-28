@@ -114,13 +114,17 @@ jobs:
           RUN opam init --disable-sandboxing --yes --compiler=4.14.0 --no-depexts
           RUN opam update
           
+          # 添加Coq仓库
+          RUN opam repo add coq-released https://coq.inria.fr/opam/released
+          RUN opam update
+          
           # 安装Coq（添加--no-depexts参数）
           RUN opam install --yes --no-depexts coq.8.16.1
           
-          # 安装Coq标准库和常用库
-          RUN opam install --yes --no-depexts coq-mathcomp-ssreflect
-          RUN opam install --yes --no-depexts coq-mathcomp-algebra
-          RUN opam install --yes --no-depexts coq-mathcomp-field
+          # 安装Coq标准库和常用库 - 使用正确的包名
+          RUN opam install --yes --no-depexts coq-mathcomp-ssreflect.1.15.0
+          RUN opam install --yes --no-depexts coq-mathcomp-algebra.1.15.0
+          RUN opam install --yes --no-depexts coq-mathcomp-field.1.15.0
           
           # 安装分析库（包含ℝ类型定义）
           RUN opam install --yes --no-depexts coq-coquelicot
