@@ -28,7 +28,7 @@ jobs:
   build-docker:
     name: 构建Coq开发镜像
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     
     outputs:
       repository-lower: ${{ steps.lowercase.outputs.repository_lower }}
@@ -410,7 +410,7 @@ jobs:
     name: Coq语法检查
     runs-on: ubuntu-22.04
     needs: [build-docker, prepare]
-    timeout-minutes: 25
+    timeout-minutes: 30
     
     steps:
       - name: 检出代码
@@ -564,7 +564,7 @@ jobs:
     name: 定理验证
     runs-on: ubuntu-22.04
     needs: [syntax-check, build-docker]
-    timeout-minutes: 30
+    timeout-minutes: 45
     
     steps:
       - name: 准备环境
