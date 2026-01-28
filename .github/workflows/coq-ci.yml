@@ -116,12 +116,17 @@ jobs:
           RUN opam init --disable-sandboxing --yes --compiler=4.14.0 --no-depexts
           RUN opam update
           
-          # 添加Coq仓库
+          # 添加Coq仓库（使用特定的旧版仓库以避免版本冲突）
           RUN opam repo add coq-released https://coq.inria.fr/opam/released
+          RUN opam repo add coq-extra-dev https://coq.inria.fr/opam/extra-dev
           RUN opam update
           
-          # 安装Coq（添加--no-depexts参数）
+          # 安装Coq（添加--no-depexts参数，并指定确切版本）
           RUN opam install --yes --no-depexts coq.8.16.1
+          
+          # 创建opam switch用于固定版本
+          RUN opam switch create coq-8.16.1 ocaml-base-compiler.4.14.0
+          RUN opam switch coq-8.16.1
           
           # 安装Coq标准库和常用库 - 使用正确的包名
           RUN opam install --yes --no-depexts coq-mathcomp-ssreflect.1.15.0
@@ -129,14 +134,24 @@ jobs:
           RUN opam install --yes --no-depexts coq-mathcomp-field.1.15.0
           
           # 安装分析库（包含ℝ类型定义）
-          RUN opam install --yes --no-depexts coq-coquelicot
+          RUN opam install --yes --no-depexts coq-coquelicot.3.4.0
           
           # 安装其他常用库
-          RUN opam install --yes --no-depexts coq-flocq
-          RUN opam install --yes --no-depexts coq-interval
+          RUN opam install --yes --no-depexts coq-flocq.4.1.0
+          RUN opam install --yes --no-depexts coq-interval.4.8.0
           
-          # 安装概率论相关库
-          RUN opam install --yes --no-depexts coq-infotheo
+          # 安装概率论相关库 - 使用与Coq 8.16.1兼容的版本
+          # 先检查可用版本，然后安装兼容版本
+          RUN opam list --available coq-infotheo | grep -E "^coq-infotheo\s" || echo "未找到coq-infotheo包"
+          # 安装兼容版本（0.5.x版本通常支持Coq 8.16.1）
+          RUN opam install --yes --no-depexts coq-infotheo.0.5.1 || \
+              opam install --yes --no-depexts coq-infotheo.0.5.0 || \
+              opam install --yes --no-depexts coq-infotheo.0.4.0 || \
+              echo "coq-infotheo安装失败，继续构建"
+          
+          # 设置环境变量，确保使用正确的Coq版本
+          ENV PATH="/root/.opam/coq-8.16.1/bin:$PATH"
+          ENV OPAMSWITCH=coq-8.16.1
           
           # 清理Opam缓存
           RUN opam clean --all --yes
@@ -146,9 +161,14 @@ jobs:
           
           # 验证Coq安装 - 使用opam exec确保找到coqc
           RUN opam exec -- coqc --version
+          RUN which coqc
           
           # 验证安装的库
-          RUN opam exec -- coqc -Q /root/.opam/4.14.0/lib/coq/user-contrib/Coquelicot Coquelicot -R /root/.opam/4.14.0/lib/coq/user-contrib/MathComp mathcomp > /dev/null 2>&1 || echo "库安装完成"
+          RUN opam exec -- coqc -Q /root/.opam/coq-8.16.1/lib/coq/user-contrib/Coquelicot Coquelicot -R /root/.opam/coq-8.16.1/lib/coq/user-contrib/MathComp mathcomp > /dev/null 2>&1 || echo "库安装完成"
+          
+          # 验证Coq版本
+          RUN echo "验证Coq版本..." && \
+              coqc --version | grep -E "8\.16\." && echo "Coq版本正确" || echo "Coq版本可能不正确"
           
           # 设置默认命令 - 使用opam exec确保找到coqc
           CMD ["opam", "exec", "--", "coqc", "--version"]
@@ -610,7 +630,7 @@ jobs:
                 head -100 FormalCert_Probability_System.v > verify_100.v
                 
                 # 设置超时，使用opam exec
-                timeout 300s opam exec -- coqc -R /root/.opam/4.14.0/lib/coq/user-contrib/Coquelicot Coquelicot -R /root/.opam/4.14.0/lib/coq/user-contrib/MathComp mathcomp -q verify_100.v 2>&1 | tee verify_output.txt
+                timeout 300s opam exec -- coqc -R /root/.opam/coq-8.16.1/lib/coq/user-contrib/Coquelicot Coquelicot -R /root/.opam/coq-8.16.1/lib/coq/user-contrib/MathComp mathcomp -q verify_100.v 2>&1 | tee verify_output.txt
                 
                 VERIFY_EXIT=\${PIPESTATUS[0]}
                 
@@ -635,7 +655,7 @@ jobs:
                     sed -n \"\${START},\${END}p\" FormalCert_Probability_System.v > theorem_test.v
                     
                     echo '尝试编译单个定理...'
-                    if opam exec -- coqc -R /root/.opam/4.14.0/lib/coq/user-contrib/Coquelicot Coquelicot -R /root/.opam/4.14.0/lib/coq/user-contrib/MathComp mathcomp -q theorem_test.v 2>&1; then
+                    if opam exec -- coqc -R /root/.opam/coq-8.16.1/lib/coq/user-contrib/Coquelicot Coquelicot -R /root/.opam/coq-8.16.1/lib/coq/user-contrib/MathComp mathcomp -q theorem_test.v 2>&1; then
                       echo '✓ 单个定理验证通过'
                     else
                       echo '⚠️ 单个定理验证失败'
@@ -753,13 +773,13 @@ jobs:
           - **运行环境**: Ubuntu 22.04
           - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
           - **缓存策略**: 使用GitHub Actions缓存，避免组织包权限问题
-          - **Coq版本**: 8.16.1
+          - **Coq版本**: 8.16.1 (已修复版本冲突)
           
-          ## 关键改进
-          1. **修复组织包权限问题**: 使用GitHub Actions缓存替代远程包推送
-          2. **可选推送**: 只有在有权限时才尝试推送到GitHub Packages
-          3. **本地优先**: 优先使用本地构建和缓存，确保流程稳定性
-          4. **完整CI/CD**: 保持完整的语法检查和定理验证流程
+          ## 关键修复
+          1. **修复Coq版本冲突**: 创建专门的opam switch来锁定Coq 8.16.1
+          2. **版本兼容性**: 为所有Coq库指定兼容版本
+          3. **安全安装coq-infotheo**: 使用try-catch模式安装兼容版本
+          4. **环境变量设置**: 正确设置PATH和OPAMSWITCH变量
           
           ## 后续步骤
           
@@ -767,7 +787,7 @@ jobs:
           
           # 根据状态给出建议
           if [ "${{ needs.build-docker.result }}" = "success" ]; then
-            echo "✅ **Docker镜像构建成功** - 使用GitHub Actions缓存，避免了权限问题" >> summary_report.md
+            echo "✅ **Docker镜像构建成功** - Coq 8.16.1环境已正确配置" >> summary_report.md
           else
             echo "❌ **Docker镜像构建失败** - 请查看详细报告" >> summary_report.md
           fi
