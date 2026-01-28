@@ -25,6 +25,7 @@ Require Import Coq.Arith.PeanoNat.            (* Peano算术 *)
 Require Import Coq.Lists.List.                (* 列表 *)
 Require Import Coq.Program.Program.           (* 程序扩展 *)
 Require Import Coq.QArith.Qminmax.            (* 有理数最小最大 *)
+Require Import Coq.Init.Prelude.              (* 基础核心库 *)
   
 (* 线性实数算术 *)
 Require Import Coq.micromega.Lra.
