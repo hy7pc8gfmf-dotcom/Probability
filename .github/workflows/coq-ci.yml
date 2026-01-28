@@ -437,12 +437,10 @@ jobs:
                 if head -n 5 FormalCert_Probability_System.v | grep -q 'Require\|From\|Import'; then
                   echo '检测到导入语句，尝试编译...'
                   
-                  # 创建一个简单的测试文件（使用标准库）
-                  cat > test_simple.v << 'TESTEOF'
-                  Require Import Coq.Init.Prelude.
-                  Theorem simple_test : True.
-                  Proof. exact I. Qed.
-                  TESTEOF
+                  # 创建一个简单的测试文件（使用标准库）- 使用echo避免here-document问题
+                  echo 'Require Import Coq.Init.Prelude.' > test_simple.v
+                  echo 'Theorem simple_test : True.' >> test_simple.v
+                  echo 'Proof. exact I. Qed.' >> test_simple.v
                   
                   if opam exec -- coqc test_simple.v; then
                     echo '✓ Coq环境正常'
