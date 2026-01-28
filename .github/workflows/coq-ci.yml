@@ -841,7 +841,7 @@ jobs:
                     
                     # 创建最简单的测试
                     echo '(* 简单测试验证环境 *)' > simple_test.v
-                    echo 'From Stdlib Require Import Coq.Init.Prelude.' >> simple_test.v
+                    echo 'Require Import Coq.Init.Prelude.' >> simple_test.v
                     echo 'Theorem simple_verification_test : True.' >> simple_test.v
                     echo 'Proof. exact I. Qed.' >> simple_test.v
                     
