@@ -42,7 +42,7 @@ jobs:
         run: |
           echo "创建修复后的Dockerfile..."
           
-          # 创建修复后的Dockerfile - 保持原有内容
+          # 创建修复后的Dockerfile - 包含所有必要的Coq库
           cat > Dockerfile.fixed << 'EOF'
           # 使用带有固定APT配置的Ubuntu基础镜像
           FROM ubuntu:22.04
@@ -105,6 +105,9 @@ jobs:
               libgmp-dev \
               # 其他常见的Coq依赖
               g++ \
+              # 数学库依赖
+              liblapack-dev \
+              libopenblas-dev \
               && rm -rf /var/lib/apt/lists/*
           
           # 设置Opam环境（添加--no-depexts避免外部依赖检查）
@@ -114,6 +117,21 @@ jobs:
           # 安装Coq（添加--no-depexts参数）
           RUN opam install --yes --no-depexts coq.8.16.1
           
+          # 安装Coq标准库和常用库
+          RUN opam install --yes --no-depexts coq-mathcomp-ssreflect
+          RUN opam install --yes --no-depexts coq-mathcomp-algebra
+          RUN opam install --yes --no-depexts coq-mathcomp-field
+          
+          # 安装分析库（包含ℝ类型定义）
+          RUN opam install --yes --no-depexts coq-coquelicot
+          
+          # 安装其他常用库
+          RUN opam install --yes --no-depexts coq-flocq
+          RUN opam install --yes --no-depexts coq-interval
+          
+          # 安装概率论相关库
+          RUN opam install --yes --no-depexts coq-infotheo
+          
           # 清理Opam缓存
           RUN opam clean --all --yes
           
@@ -122,6 +140,9 @@ jobs:
           
           # 验证Coq安装 - 使用opam exec确保找到coqc
           RUN opam exec -- coqc --version
+          
+          # 验证安装的库
+          RUN opam exec -- coqc -Q /root/.opam/4.14.0/lib/coq/user-contrib/Coquelicot Coquelicot -R /root/.opam/4.14.0/lib/coq/user-contrib/MathComp mathcomp > /dev/null 2>&1 || echo "库安装完成"
           
           # 设置默认命令 - 使用opam exec确保找到coqc
           CMD ["opam", "exec", "--", "coqc", "--version"]
@@ -226,6 +247,10 @@ jobs:
           # 检查Coq是否安装 - 使用opam exec
           docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest opam exec -- which coqc && echo "✓ coqc已安装" || echo "✗ coqc未安装"
           docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest opam exec -- coqc --version || echo "无法获取coqc版本"
+          
+          # 检查关键库是否安装
+          echo "检查关键库是否安装..."
+          docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest opam exec -- opam list | grep -E "coq-mathcomp|coq-coquelicot|coq-infotheo" || echo "库列表检查失败"
           
           echo "Docker镜像验证完成"
       
@@ -579,7 +604,7 @@ jobs:
                 head -100 FormalCert_Probability_System.v > verify_100.v
                 
                 # 设置超时，使用opam exec
-                timeout 300s opam exec -- coqc -q verify_100.v 2>&1 | tee verify_output.txt
+                timeout 300s opam exec -- coqc -R /root/.opam/4.14.0/lib/coq/user-contrib/Coquelicot Coquelicot -R /root/.opam/4.14.0/lib/coq/user-contrib/MathComp mathcomp -q verify_100.v 2>&1 | tee verify_output.txt
                 
                 VERIFY_EXIT=\${PIPESTATUS[0]}
                 
@@ -604,7 +629,7 @@ jobs:
                     sed -n \"\${START},\${END}p\" FormalCert_Probability_System.v > theorem_test.v
                     
                     echo '尝试编译单个定理...'
-                    if opam exec -- coqc -q theorem_test.v 2>&1; then
+                    if opam exec -- coqc -R /root/.opam/4.14.0/lib/coq/user-contrib/Coquelicot Coquelicot -R /root/.opam/4.14.0/lib/coq/user-contrib/MathComp mathcomp -q theorem_test.v 2>&1; then
                       echo '✓ 单个定理验证通过'
                     else
                       echo '⚠️ 单个定理验证失败'
