@@ -28,7 +28,7 @@ jobs:
   build-docker:
     name: 构建Coq开发镜像
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     
     outputs:
       repository-lower: ${{ steps.lowercase.outputs.repository_lower }}
