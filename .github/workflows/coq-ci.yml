@@ -143,8 +143,13 @@ jobs:
           # 如果coq-infotheo安装失败，尝试安装不指定版本
           RUN opam install --yes --no-depexts coq-infotheo || echo "coq-infotheo可能无法安装，继续..."
           
-          # 清理Opam缓存
-          RUN opam clean --all --yes
+          # 清理Opam缓存和不需要的文件
+          RUN opam clean --all --yes && \
+              rm -rf /root/.cache && \
+              rm -rf /tmp/* && \
+              rm -rf /var/cache/apt/* && \
+              apt-get autoremove -y && \
+              apt-get clean -y
           
           # 设置工作目录
           WORKDIR /workspace
@@ -161,6 +166,15 @@ jobs:
           EOF
           
           echo "Dockerfile.fixed已创建"
+      
+      - name: 清理磁盘空间
+        run: |
+          echo "清理磁盘空间..."
+          df -h
+          sudo apt-get clean || true
+          sudo rm -rf /var/lib/apt/lists/* || true
+          docker system prune -f || true
+          df -h
       
       - name: 设置Docker构建环境
         uses: docker/setup-buildx-action@v3
@@ -198,6 +212,11 @@ jobs:
           echo "小写仓库名: $REPO_LOWER"
           echo "repository_lower=$REPO_LOWER" >> $GITHUB_OUTPUT
       
+      - name: 清理Docker构建缓存
+        run: |
+          echo "清理Docker构建缓存..."
+          docker builder prune -f --all || true
+      
       - name: 构建Docker镜像（不推送，只构建和缓存）
         id: build-docker
         uses: docker/build-push-action@v5
@@ -222,6 +241,9 @@ jobs:
           docker tag ${{ env.DOCKER_IMAGE_NAME }}:latest coq-ci:latest
           echo "镜像已加载并标记为 coq-ci:latest"
           docker images | grep coq-ci
+          
+          # 清理临时文件释放空间
+          rm -f /tmp/coq-image.tar
       
       - name: 尝试推送到GitHub Packages（可选的，如果权限允许）
         if: github.event_name != 'pull_request'
@@ -266,18 +288,43 @@ jobs:
           
           echo "Docker镜像验证完成"
       
-      - name: 保存镜像为tar包（用于后续步骤）
+      - name: 保存压缩镜像为tar.gz包
         run: |
-          # 保存本地标签的镜像
-          docker save ${{ env.DOCKER_IMAGE_NAME }}:latest -o coq-image.tar
-          echo "镜像已保存为coq-image.tar"
-          ls -lh coq-image.tar
+          echo "保存压缩镜像..."
+          df -h
+          
+          # 清理之前可能存在的文件
+          rm -f coq-image.tar coq-image.tar.gz
+          
+          # 使用gzip压缩保存镜像，减少磁盘占用
+          docker save ${{ env.DOCKER_IMAGE_NAME }}:latest | gzip -c > coq-image.tar.gz
+          
+          echo "镜像已压缩保存为coq-image.tar.gz"
+          ls -lh coq-image.tar.gz
+          
+          # 验证压缩文件
+          if [ -f "coq-image.tar.gz" ]; then
+            echo "压缩文件大小: $(ls -lh coq-image.tar.gz | awk '{print $5}')"
+            echo "压缩文件完整性检查..."
+            gzip -t coq-image.tar.gz && echo "✓ 压缩文件完整" || echo "✗ 压缩文件损坏"
+          else
+            echo "错误: 压缩文件未创建"
+            exit 1
+          fi
+          
+          df -h
+      
+      - name: 清理Docker缓存和临时文件
+        run: |
+          echo "清理Docker缓存..."
+          docker system prune -f || true
+          df -h
       
       - name: 上传Docker镜像缓存
         uses: actions/upload-artifact@v4
         with:
           name: coq-docker-image
-          path: coq-image.tar
+          path: coq-image.tar.gz
           retention-days: 1
 
   # 阶段2: 代码预处理和文件准备
@@ -299,9 +346,13 @@ jobs:
       
       - name: 加载Docker镜像
         run: |
-          docker load -i coq-image.tar
+          echo "加载压缩的Docker镜像..."
+          gunzip -c coq-image.tar.gz | docker load
           echo "已加载的Docker镜像:"
           docker images | grep "${{ env.DOCKER_IMAGE_NAME }}"
+          
+          # 清理下载的文件
+          rm -f coq-image.tar.gz
       
       - name: 处理Coq文件
         run: |
@@ -436,8 +487,10 @@ jobs:
       
       - name: 加载Docker镜像
         run: |
-          docker load -i coq-image.tar
+          echo "加载压缩的Docker镜像..."
+          gunzip -c coq-image.tar.gz | docker load
           echo "镜像加载完成"
+          rm -f coq-image.tar.gz
       
       - name: 运行语法检查
         run: |
@@ -590,7 +643,10 @@ jobs:
       
       - name: 加载Docker镜像
         run: |
-          docker load -i coq-image.tar
+          echo "加载压缩的Docker镜像..."
+          gunzip -c coq-image.tar.gz | docker load
+          echo "镜像加载完成"
+          rm -f coq-image.tar.gz
       
       - name: 基础验证
         run: |
@@ -766,6 +822,7 @@ jobs:
           2. **保持简单**: 避免引入opam switch和复杂的版本控制
           3. **优雅失败**: 如果coq-infotheo安装失败，继续构建
           4. **基本环境**: 确保Coq 8.16.1和核心库正确安装
+          5. **磁盘优化**: 使用gzip压缩镜像，清理缓存，解决磁盘空间不足问题
           
           ## 后续步骤
           
