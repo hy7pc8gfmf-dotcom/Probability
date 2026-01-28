@@ -540,11 +540,7 @@ jobs:
         with:
           name: coq-source-files
           path: .
-      
-      - name: 加载Docker镜像
-        run: |
-          docker load -i coq-image.tar
-      
+            
       - name: 基础验证
         run: |
           echo "运行基础定理验证..."
