@@ -55,6 +55,9 @@ Require Import Coq.Reals.Ranalysis1.
 Require Import Coq.micromega.Lra.
 From Coq Require Import Lia.
   
+(* 从Coquelicot导入高级分析工具 *)
+Require Import Coquelicot.Coquelicot.
+  
 Open Scope Q_scope.
 Open Scope R_scope.
   
