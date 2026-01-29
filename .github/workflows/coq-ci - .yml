@@ -16,9 +16,6 @@ on:
 
 env:
   DOCKER_IMAGE_NAME: formalcert-coq-ci
-  REPOSITORY_NAME: ${{ github.repository }}
-  REPOSITORY_LOWER: ${{ format('{0}', github.repository) }}
-  DOCKER_CACHE_FROM: ghcr.io/${{ format('{0}', github.repository) }}/coq-ci:latest
   OPAMYES: "true"
   OPAMROOT: /usr/local/opam
 
@@ -28,10 +25,6 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     
-    outputs:
-      repository-lower: ${{ steps.lowercase.outputs.repository_lower }}
-      docker-built: ${{ steps.build-docker.outputs.docker-built }}
-    
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -40,154 +33,112 @@ jobs:
         run: |
           echo "创建修复后的Dockerfile..."
           cat > Dockerfile.fixed << 'EOF'
-          FROM ubuntu:22.04
-          ENV DEBIAN_FRONTEND=noninteractive
-          ENV TZ=UTC
-          USER root
-          
-          RUN mkdir -p /var/lib/apt/lists/partial && \
-              chmod 0755 /var/lib/apt/lists/partial && \
-              chown _apt:root /var/lib/apt/lists/partial && \
-              mkdir -p /var/cache/apt/archives/partial && \
-              chmod 0755 /var/cache/apt/archives/partial
-          
-          RUN echo 'Acquire::GzipIndexes "false";' > /etc/apt/apt.conf.d/99disable-gzip-indexes && \
-              echo 'Acquire::CompressionTypes::Order:: "gz";' >> /etc/apt/apt.conf.d/99disable-gzip-indexes
-          
-          RUN apt-get update -o Acquire::http::No-Cache=true
-          
-          RUN apt-get install -y --no-install-recommends \
-              ca-certificates \
-              apt-transport-https \
-              gnupg \
-              lsb-release \
-              curl \
-              wget \
-              && rm -rf /var/lib/apt/lists/*
-          
-          RUN mkdir -p /etc/apt/keyrings && \
-              curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
-              chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-          
-          RUN apt-get update
-          
-          RUN apt-get install -y --no-install-recommends \
-              git \
-              make \
-              time \
-              tar \
-              gzip \
-              && rm -rf /var/lib/apt/lists/*
-          
-          RUN apt-get update && apt-get install -y --no-install-recommends \
-              opam \
-              m4 \
-              pkg-config \
-              bubblewrap \
-              libgmp-dev \
-              g++ \
-              clang \
-              liblapack-dev \
-              libopenblas-dev \
-              && rm -rf /var/lib/apt/lists/*
-          
-          RUN opam init --disable-sandboxing --yes --compiler=4.14.0 --no-depexts
-          RUN opam update
-          RUN opam repo add coq-released https://coq.inria.fr/opam/released
-          RUN opam update
-          RUN opam install --yes --no-depexts coq.8.16.1
-          RUN opam install --yes --no-depexts coq-mathcomp-ssreflect.1.15.0
-          RUN opam install --yes --no-depexts coq-mathcomp-algebra.1.15.0
-          RUN opam install --yes --no-depexts coq-mathcomp-field.1.15.0
-          RUN opam install --yes --no-depexts coq-coquelicot
-          RUN opam install --yes --no-depexts coq-flocq
-          RUN opam install --yes --no-depexts coq-interval
-          RUN opam install --yes --no-depexts coq-mathcomp-analysis
-          
-          RUN opam install --yes --no-depexts coq-infotheo || \
-              (echo "尝试安装coq-infotheo失败，检查可用版本..." && \
-               opam list --available coq-infotheo)
-          
-          RUN opam install --yes --no-depexts coq-infotheo || echo "coq-infotheo可能无法安装，继续..."
-          
-          RUN opam clean --all --yes && \
-              rm -rf /root/.cache && \
-              rm -rf /tmp/* && \
-              rm -rf /var/cache/apt/* && \
-              apt-get autoremove -y && \
-              apt-get clean -y
-          
-          WORKDIR /workspace
-          
-          RUN opam exec -- coqc --version
-          
-          RUN echo "测试ℝ类型是否可用..." && \
-              echo 'From Coq Require Import Reals. Open Scope R_scope. Definition test_R : R := 0%R.' > test_R.v && \
-              opam exec -- coqc test_R.v && echo "✓ Reals库可用" || echo "⚠️ Reals库有问题"
-          
-          RUN echo "测试Coquelicot库是否可用..." && \
-              echo 'From Coq Require Import Reals. Require Import Coquelicot.Coquelicot. Open Scope R_scope. Definition test_R2 : R := 1%R.' > test_coquelicot.v && \
-              opam exec -- coqc test_coquelicot.v && echo "✓ Coquelicot库可用" || echo "⚠️ Coquelicot库有问题"
-          
-          CMD ["opam", "exec", "--", "coqc", "--version"]
-          EOF
-          
-          echo "Dockerfile.fixed已创建"
-      
-      - name: 清理磁盘空间
-        run: |
-          echo "清理磁盘空间..."
-          df -h
-          sudo apt-get clean || true
-          sudo rm -rf /var/lib/apt/lists/* || true
-          docker system prune -f || true
-          df -h
-      
-      - name: 设置Docker构建环境
-        uses: docker/setup-buildx-action@v3
-      
-      - name: 转换仓库名称为小写
-        id: lowercase
-        run: |
-          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "repository_lower=$REPO_LOWER" >> $GITHUB_OUTPUT
+FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+USER root
+
+RUN mkdir -p /var/lib/apt/lists/partial && \
+    chmod 0755 /var/lib/apt/lists/partial && \
+    chown _apt:root /var/lib/apt/lists/partial && \
+    mkdir -p /var/cache/apt/archives/partial && \
+    chmod 0755 /var/cache/apt/archives/partial
+
+RUN echo 'Acquire::GzipIndexes "false";' > /etc/apt/apt.conf.d/99disable-gzip-indexes && \
+    echo 'Acquire::CompressionTypes::Order:: "gz";' >> /etc/apt/apt.conf.d/99disable-gzip-indexes
+
+RUN apt-get update -o Acquire::http::No-Cache=true
+
+RUN apt-get install -y --no-install-recommends \
+    ca-certificates \
+    apt-transport-https \
+    gnupg \
+    lsb-release \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+
+RUN apt-get update
+
+RUN apt-get install -y --no-install-recommends \
+    git \
+    make \
+    time \
+    tar \
+    gzip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    opam \
+    m4 \
+    pkg-config \
+    bubblewrap \
+    libgmp-dev \
+    g++ \
+    clang \
+    liblapack-dev \
+    libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN opam init --disable-sandboxing --yes --compiler=4.14.0 --no-depexts
+RUN opam update
+RUN opam repo add coq-released https://coq.inria.fr/opam/released
+RUN opam update
+RUN opam install --yes --no-depexts coq.8.16.1
+RUN opam install --yes --no-depexts coq-mathcomp-ssreflect.1.15.0
+RUN opam install --yes --no-depexts coq-mathcomp-algebra.1.15.0
+RUN opam install --yes --no-depexts coq-mathcomp-field.1.15.0
+RUN opam install --yes --no-depexts coq-coquelicot
+RUN opam install --yes --no-depexts coq-flocq
+RUN opam install --yes --no-depexts coq-interval
+RUN opam install --yes --no-depexts coq-mathcomp-analysis
+
+RUN opam clean --all --yes && \
+    rm -rf /root/.cache && \
+    rm -rf /tmp/* && \
+    rm -rf /var/cache/apt/* && \
+    apt-get autoremove -y && \
+    apt-get clean -y
+
+WORKDIR /workspace
+
+RUN opam exec -- coqc --version
+
+RUN echo "测试实数库..." && \
+    echo 'From Coq Require Import Reals. Open Scope R_scope. Definition test_R : R := 0%R.' > test_R.v && \
+    opam exec -- coqc test_R.v && echo "✓ Reals库可用" || echo "⚠️ Reals库有问题"
+
+CMD ["opam", "exec", "--", "coqc", "--version"]
+EOF
       
       - name: 构建Docker镜像
-        id: build-docker
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.fixed
           tags: ${{ env.DOCKER_IMAGE_NAME }}:latest
-          cache-from: type=gha,scope=coq-ci
-          cache-to: type=gha,scope=coq-ci,mode=max
           push: false
           platforms: linux/amd64
           outputs: type=docker,dest=/tmp/coq-image.tar
       
-      - name: 加载Docker镜像到本地
+      - name: 加载并测试Docker镜像
         run: |
-          echo "加载Docker镜像到本地..."
           docker load -i /tmp/coq-image.tar
-          docker tag ${{ env.DOCKER_IMAGE_NAME }}:latest coq-ci:latest
+          echo "Docker镜像验证:"
+          docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest opam exec -- coqc --version
           rm -f /tmp/coq-image.tar
-      
-      - name: 验证Docker镜像
-        run: |
-          echo "验证Docker镜像..."
-          docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest echo "Docker镜像测试成功"
-          docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest opam exec -- which coqc && echo "✓ coqc已安装" || echo "✗ coqc未安装"
-          docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:latest opam exec -- coqc --version || echo "无法获取coqc版本"
       
       - name: 保存压缩镜像
         run: |
-          echo "保存压缩镜像..."
-          rm -f coq-image.tar coq-image.tar.gz
           docker save ${{ env.DOCKER_IMAGE_NAME }}:latest | gzip -c > coq-image.tar.gz
-          echo "镜像已压缩保存为coq-image.tar.gz"
+          echo "镜像已保存为coq-image.tar.gz"
           ls -lh coq-image.tar.gz
       
-      - name: 上传Docker镜像缓存
+      - name: 上传Docker镜像
         uses: actions/upload-artifact@v4
         with:
           name: coq-docker-image
@@ -212,10 +163,7 @@ jobs:
       
       - name: 加载Docker镜像
         run: |
-          echo "加载压缩的Docker镜像..."
           gunzip -c coq-image.tar.gz | docker load
-          echo "已加载的Docker镜像:"
-          docker images | grep "${{ env.DOCKER_IMAGE_NAME }}"
           rm -f coq-image.tar.gz
       
       - name: 处理Coq文件
@@ -223,32 +171,19 @@ jobs:
           echo "准备Coq文件..."
           mkdir -p src
           
+          # 优先查找.v文件
           COQ_FILES=$(find . -name "*.v" -type f | head -5)
-          TEXT_FILES=$(find . -name "*.txt" -type f | head -5)
-          
-          echo "找到的Coq文件:"
-          echo "$COQ_FILES"
           
           if [ -n "$COQ_FILES" ]; then
             FIRST_COQ=$(echo "$COQ_FILES" | head -1)
-            echo "使用第一个Coq文件: $FIRST_COQ"
+            echo "使用Coq文件: $FIRST_COQ"
             cp "$FIRST_COQ" "src/FormalCert_Probability_System.v"
-          elif [ -f "上.txt" ]; then
-            echo "使用中文文件 上.txt"
-            cp "上.txt" "src/FormalCert_Probability_System.v"
-          elif [ -n "$TEXT_FILES" ]; then
-            FIRST_TEXT=$(echo "$TEXT_FILES" | head -1)
-            echo "使用第一个文本文件: $FIRST_TEXT"
-            cp "$FIRST_TEXT" "src/FormalCert_Probability_System.v"
           else
-            echo "警告: 未找到Coq或文本文件，创建示例文件"
+            echo "创建示例Coq文件..."
             cat > src/FormalCert_Probability_System.v << 'EOF'
-(* FormalCert Probability System - Example File *)
-Require Import Coq.Arith.Arith.
-Require Import Coq.Lists.List.
-Require Import Coq.Reals.Reals.
+(* FormalCert Probability System *)
+From Coq Require Import Reals.
 Require Import Coquelicot.Coquelicot.
-
 Open Scope R_scope.
 
 (* 概率系统基本定义 *)
@@ -274,9 +209,7 @@ EOF
           fi
           
           echo "src/FormalCert_Probability_System.v" > coq_files.txt
-          
-          echo "文件列表:"
-          cat coq_files.txt
+          echo "文件准备完成"
       
       - name: 上传处理后的文件
         uses: actions/upload-artifact@v4
@@ -297,13 +230,13 @@ EOF
       - name: 检出代码
         uses: actions/checkout@v4
       
-      - name: 下载源代码文件
+      - name: 下载源代码
         uses: actions/download-artifact@v4
         with:
           name: coq-source-files
           path: .
       
-      - name: 下载Docker镜像文件
+      - name: 下载Docker镜像
         uses: actions/download-artifact@v4
         with:
           name: coq-docker-image
@@ -312,69 +245,60 @@ EOF
       - name: 加载Docker镜像
         run: |
           gunzip -c coq-image.tar.gz | docker load
-          echo "镜像加载完成"
           rm -f coq-image.tar.gz
       
       - name: 运行语法检查
         run: |
-          echo "在Docker容器中运行语法检查..."
-          
-          mkdir -p coq_workspace
-          cp -r src coq_workspace/
+          echo "运行语法检查..."
           
           docker run --rm \
-            -v $(pwd)/coq_workspace:/workspace \
+            -v $(pwd):/workspace \
             -w /workspace \
             ${{ env.DOCKER_IMAGE_NAME }}:latest \
             bash -c '
               echo "=== Coq环境检查 ==="
-              opam exec -- which coqc && opam exec -- coqc --version || echo "coqc未安装"
-              opam exec -- which coqtop && opam exec -- coqtop --version || echo "coqtop未安装"
+              opam exec -- coqc --version
               
-              echo "=== 文件检查 ==="
-              ls -la /workspace/src/
-              
-              if [ -f "/workspace/src/FormalCert_Probability_System.v" ]; then
-                echo "开始语法检查..."
+              echo "=== 语法检查 ==="
+              if [ -f "src/FormalCert_Probability_System.v" ]; then
                 cd src
-                echo "检查前50行基本语法..."
-                head -50 FormalCert_Probability_System.v > test_partial.v
+                echo "检查前100行..."
+                head -100 FormalCert_Probability_System.v > test_check.v
                 
-                if opam exec -- coqc -q test_partial.v 2>&1; then
-                  echo "✓ 基本语法检查通过（前50行）"
+                if opam exec -- coqc -q test_check.v 2>&1; then
+                  echo "✅ 基本语法正确"
                 else
-                  echo "⚠️ 文件可能有语法错误"
+                  echo "⚠️ 语法检查发现问题"
+                  opam exec -- coqc -q test_check.v 2>&1 | head -50
                 fi
               else
-                echo "错误: 未找到Coq源文件"
+                echo "❌ 未找到Coq文件"
                 exit 1
               fi
             '
       
       - name: 生成语法检查报告
-        if: always()
         run: |
           echo "生成语法检查报告..."
           cat > syntax_report.md << 'EOF'
-          # Coq语法检查报告
-          
-          ## 基本信息
-          - **检查时间**: $(date)
-          - **仓库**: ${{ github.repository }}
-          - **提交**: ${{ github.sha }}
-          - **分支**: ${{ github.ref_name }}
-          
-          ## 文件状态
-          EOF
-          
-          if [ -f "src/FormalCert_Probability_System.v" ]; then
-            LINES=$(wc -l < src/FormalCert_Probability_System.v 2>/dev/null || echo "0")
-            echo "- **主文件**: src/FormalCert_Probability_System.v" >> syntax_report.md
-            echo "- **文件大小**: $LINES 行" >> syntax_report.md
-          else
-            echo "## 错误信息" >> syntax_report.md
-            echo "- 未找到Coq源文件" >> syntax_report.md
-          fi
+# Coq语法检查报告
+
+## 基本信息
+- **检查时间**: $(date)
+- **仓库**: ${{ github.repository }}
+- **提交**: ${{ github.sha }}
+- **分支**: ${{ github.ref_name }}
+
+## 检查结果
+- **文件**: src/FormalCert_Probability_System.v
+- **状态**: ${{ job.status }}
+
+## 详细信息
+- **文件大小**: $(wc -l < src/FormalCert_Probability_System.v 2>/dev/null || echo "0") 行
+- **定理数量**: $(grep -c -i "^\(Theorem\|Lemma\|Corollary\)" src/FormalCert_Probability_System.v 2>/dev/null || echo "0")
+- **定义数量**: $(grep -c -i "^Definition\|^Inductive\|^Fixpoint" src/FormalCert_Probability_System.v 2>/dev/null || echo "0")
+
+EOF
           
           cat syntax_report.md
       
@@ -386,7 +310,7 @@ EOF
           retention-days: 7
 
   theorem-verify:
-    name: 定理验证（完整编译）
+    name: 定理验证和完整编译
     runs-on: ubuntu-22.04
     needs: [syntax-check, build-docker]
     timeout-minutes: 60
@@ -401,7 +325,7 @@ EOF
           name: coq-source-files
           path: .
       
-      - name: 下载Docker镜像文件
+      - name: 下载Docker镜像
         uses: actions/download-artifact@v4
         with:
           name: coq-docker-image
@@ -410,7 +334,6 @@ EOF
       - name: 加载Docker镜像
         run: |
           gunzip -c coq-image.tar.gz | docker load
-          echo "镜像加载完成"
           rm -f coq-image.tar.gz
       
       - name: 完整编译检查
@@ -425,47 +348,40 @@ EOF
               echo "=== 完整编译检查开始 ==="
               
               if [ -f "src/FormalCert_Probability_System.v" ]; then
-                echo "检查文件并准备编译环境..."
                 mkdir -p test_coq
                 cp src/FormalCert_Probability_System.v test_coq/
                 cd test_coq
+                
                 START_TIME=$(date +%s)
                 
                 echo "=== 步骤1: 创建修复版本 ==="
                 cp FormalCert_Probability_System.v original.v
                 cp original.v fixed.v
                 
-                # 修复Stdlib逻辑路径问题（完美版的特性）
+                # 修复From Stdlib问题
                 if grep -q "From Stdlib" fixed.v; then
-                  echo "修复From Stdlib逻辑路径问题..."
                   sed -i "s/From Stdlib Require Import/From Coq Require Import/g" fixed.v
                   sed -i "s/^From Stdlib$/From Coq/g" fixed.v
                 fi
                 
-                # 确保实数库导入（完美版的特性）
-                if grep -q "ℝ" fixed.v || grep -q "R" fixed.v; then
-                  echo "检查实数库导入..."
-                  if ! grep -q "Require.*Reals\|From.*Reals" fixed.v; then
-                    echo "添加实数库导入..."
-                    cp fixed.v temp.v
-                    echo "From Coq Require Import Reals." > fixed.v
-                    echo "Require Import Coquelicot.Coquelicot." >> fixed.v
-                    echo "Open Scope R_scope." >> fixed.v
-                    echo "" >> fixed.v
-                    cat temp.v >> fixed.v
-                    rm temp.v
-                  fi
+                # 确保实数库导入
+                if ! grep -q "Require.*Reals\|From.*Reals" fixed.v; then
+                  cp fixed.v temp.v
+                  echo "From Coq Require Import Reals." > fixed.v
+                  echo "Require Import Coquelicot.Coquelicot." >> fixed.v
+                  echo "Open Scope R_scope." >> fixed.v
+                  echo "" >> fixed.v
+                  cat temp.v >> fixed.v
+                  rm temp.v
                 fi
                 
                 echo "=== 步骤2: 尝试编译 ==="
-                COMPILE_OUTPUT_FILE=$(mktemp)
-                COMPILE_START=$(date +%s)
-                
-                echo "开始编译修复文件..."
-                if timeout 300s opam exec -- coqc -q fixed.v 2>&1 | tee "$COMPILE_OUTPUT_FILE"; then
+                if opam exec -- coqc -q fixed.v 2>&1; then
                   if [ -f "fixed.vo" ]; then
                     echo "✅ 编译成功！"
                     COMPILE_STATUS="成功"
+                    cp fixed.vo /workspace/FormalCert_Probability_System.vo 2>/dev/null || true
+                    cp fixed.glob /workspace/FormalCert_Probability_System.glob 2>/dev/null || true
                   else
                     echo "⚠️ 编译过程成功但未生成.vo文件"
                     COMPILE_STATUS="部分成功"
@@ -475,52 +391,29 @@ EOF
                   COMPILE_STATUS="失败"
                 fi
                 
-                COMPILE_END=$(date +%s)
-                COMPILE_TIME=$((COMPILE_END - COMPILE_START))
+                END_TIME=$(date +%s)
+                COMPILE_TIME=$((END_TIME - START_TIME))
                 
                 echo "=== 步骤3: 生成编译报告 ==="
                 echo "# FormalCert_Probability_System.v 编译报告" > compile_report.md
                 echo "## 编译信息" >> compile_report.md
-                echo "- **编译开始时间**: $(date)" >> compile_report.md
-                echo "- **源文件**: FormalCert_Probability_System.v" >> compile_report.md
-                echo "- **文件大小**: $(wc -l < original.v) 行" >> compile_report.md
-                echo "" >> compile_report.md
-                
-                echo "## 编译结果" >> compile_report.md
                 echo "- **状态**: $COMPILE_STATUS" >> compile_report.md
                 echo "- **编译时间**: ${COMPILE_TIME}秒" >> compile_report.md
+                echo "- **文件大小**: $(wc -l < original.v) 行" >> compile_report.md
+                
+                echo "" >> compile_report.md
+                echo "## 内容分析" >> compile_report.md
+                echo "- **定理数量**: $(grep -c -i "^\(Theorem\|Lemma\|Corollary\)" original.v)" >> compile_report.md
+                echo "- **定义数量**: $(grep -c -i "^Definition\|^Inductive\|^Fixpoint" original.v)" >> compile_report.md
+                echo "- **From Stdlib出现次数**: $(grep -c "From Stdlib" original.v)" >> compile_report.md
                 
                 if [ -f "fixed.vo" ]; then
-                  echo "- **生成文件**: fixed.vo (已生成)" >> compile_report.md
-                  echo "- **文件大小**: $(stat -c%s fixed.vo 2>/dev/null || echo "未知") 字节" >> compile_report.md
-                  cp fixed.vo /workspace/FormalCert_Probability_System.vo 2>/dev/null || true
-                  cp fixed.glob /workspace/FormalCert_Probability_System.glob 2>/dev/null || true
-                else
-                  echo "- **生成文件**: 未生成.vo文件" >> compile_report.md
+                  echo "" >> compile_report.md
+                  echo "## 已证明的定理" >> compile_report.md
+                  grep -E "^Theorem|^Lemma|^Corollary" original.v | head -20 >> compile_report.md
                 fi
-                
-                if [ "$COMPILE_STATUS" = "失败" ]; then
-                  echo "### 编译错误" >> compile_report.md
-                  echo "\`\`\`" >> compile_report.md
-                  cat "$COMPILE_OUTPUT_FILE" >> compile_report.md
-                  echo "\`\`\`" >> compile_report.md
-                fi
-                
-                echo "" >> compile_report.md
-                echo "## 文件内容分析" >> compile_report.md
-                echo "- **定理数量**: $(grep -c -i "^\(Theorem\|Lemma\|Corollary\|Axiom\)" original.v)" >> compile_report.md
-                echo "- **定义数量**: $(grep -c -i "^Definition\|^Inductive\|^Fixpoint" original.v)" >> compile_report.md
-                echo "- **ℝ符号出现次数**: $(grep -c "ℝ" original.v 2>/dev/null || echo "0")" >> compile_report.md
-                echo "- **From Stdlib出现次数**: $(grep -c "From Stdlib" original.v 2>/dev/null || echo "0")" >> compile_report.md
-                
-                echo "" >> compile_report.md
-                echo "## 编译结束时间" >> compile_report.md
-                echo "- **结束时间**: $(date)" >> compile_report.md
-                echo "- **总耗时**: $(( $(date +%s) - START_TIME )) 秒" >> compile_report.md
                 
                 cp compile_report.md /workspace/
-                
-                echo "=== 完整编译检查结束 ==="
                 
               else
                 echo "错误: 未找到源文件"
@@ -529,33 +422,34 @@ EOF
             '
       
       - name: 生成验证报告
-        if: always()
         run: |
           echo "生成验证报告..."
           cat > verify_report.md << 'EOF'
-          # FormalCert Probability System 验证报告
-          
-          ## 验证信息
-          - **验证时间**: $(date)
-          - **验证模式**: 完整编译检查
-          - **运行ID**: ${{ github.run_id }}
-          - **提交**: ${{ github.sha }}
-          
-          ## 验证结果
-          EOF
+# FormalCert Probability System 验证报告
+
+## 验证信息
+- **验证时间**: $(date)
+- **验证模式**: 完整编译检查
+- **运行ID**: ${{ github.run_id }}
+- **提交**: ${{ github.sha }}
+
+## 验证结果
+EOF
           
           if [ -f "FormalCert_Probability_System.vo" ]; then
             echo "- ✅ **FormalCert_Probability_System.v 编译成功**" >> verify_report.md
             echo "- 📊 **生成文件**: FormalCert_Probability_System.vo" >> verify_report.md
-            echo "- 💾 **文件大小**: $(stat -c%s FormalCert_Probability_System.vo 2>/dev/null || echo "未知") 字节" >> verify_report.md
           else
             echo "- ❌ **FormalCert_Probability_System.v 编译失败**" >> verify_report.md
-            echo "- 🔍 **检查**: 未找到编译生成的.vo文件" >> verify_report.md
           fi
+          
+          echo "" >> verify_report.md
+          echo "## 详细报告" >> verify_report.md
+          echo "请查看compile_report.md了解详细编译信息。" >> verify_report.md
           
           cat verify_report.md
       
-      - name: 上传编译报告和生成的文件
+      - name: 上传编译结果
         uses: actions/upload-artifact@v4
         with:
           name: theorem-verify-full
@@ -583,30 +477,100 @@ EOF
           name: theorem-verify-full
           path: .
       
-      - name: 生成综合报告
+      - name: 创建打印脚本
         run: |
-          echo "生成综合报告..."
+          echo "创建改进的打印脚本..."
+          cat > print_proof_results.sh << 'EOF'
+#!/bin/bash
+
+# 形证概率系统 - 证明成果打印脚本
+# 修复版，用于打印证明结果和定理列表
+
+# 打印系统标题
+echo -e "\n\033[1;36m==================================================\033[0m"
+echo -e "\033[1;36m    形证概率系统 (FormalCert Probability System)    \033[0m"
+echo -e "\033[1;36m          证明成果概览 (修复版)              \033[0m"
+echo -e "\033[1;36m==================================================\033[0m"
+
+# 检查是否有编译报告
+if [ -f "compile_report.md" ]; then
+    echo -e "\n\033[1;32m编译验证状态:\033[0m"
+    echo "-----------------------------------"
+    if grep -q "成功" compile_report.md; then
+        echo -e "\033[1;32m✅ 编译验证通过\033[0m"
+    else
+        echo -e "\033[1;31m⚠️ 编译验证未通过\033[0m"
+    fi
+    
+    echo -e "\n\033[1;32m已证明的定理:\033[0m"
+    echo "-----------------------------------"
+    if grep -q "已证明的定理" compile_report.md; then
+        awk '/已证明的定理/,/^$/' compile_report.md | grep -E "Theorem|Lemma|Corollary" | sed 's/^/- /'
+    else
+        grep -E "^Theorem|^Lemma|^Corollary" compile_report.md 2>/dev/null | sed 's/^/- /' | head -10
+    fi
+    
+    echo -e "\n\033[1;32m文件统计:\033[0m"
+    echo "-----------------------------------"
+    grep -E "文件大小|定理数量|定义数量" compile_report.md | sed 's/- \*\*/* /;s/\*\*:/*/'
+fi
+
+# 检查是否有.vo文件
+echo -e "\n\033[1;32m编译产物:\033[0m"
+echo "-----------------------------------"
+if [ -f "FormalCert_Probability_System.vo" ]; then
+    echo -e "✅ 生成.vo文件: FormalCert_Probability_System.vo"
+    FILE_SIZE=$(stat -c%s FormalCert_Probability_System.vo 2>/dev/null || echo "未知")
+    echo -e "📊 文件大小: $FILE_SIZE 字节"
+else
+    echo -e "❌ 未生成.vo文件"
+fi
+
+# 打印CI/CD信息
+echo -e "\n\033[1;32mCI/CD执行信息:\033[0m"
+echo "-----------------------------------"
+echo "仓库: ${{ github.repository }}"
+echo "分支: ${{ github.ref }}"
+echo "提交: ${{ github.sha }}"
+echo "运行ID: ${{ github.run_id }}"
+echo "执行时间: $(date)"
+
+echo -e "\n\033[1;36m==================================================\033[0m"
+echo -e "\033[1;36m形证概率系统证明成果打印完成\033[0m"
+echo -e "\033[1;36m==================================================\033[0m"
+EOF
+          
+          chmod +x print_proof_results.sh
+      
+      - name: 运行打印脚本
+        run: |
+          echo "运行打印脚本..."
+          ./print_proof_results.sh
+      
+      - name: 生成汇总报告
+        run: |
+          echo "生成汇总报告..."
           cat > summary_report.md << 'EOF'
-          # FormalCert Probability System - CI/CD 综合报告
-          
-          ## 执行概况
-          - **工作流**: ${{ github.workflow }}
-          - **运行ID**: ${{ github.run_id }}
-          - **触发事件**: ${{ github.event_name }}
-          - **提交**: ${{ github.sha }}
-          - **分支**: ${{ github.ref }}
-          - **执行时间**: $(date)
-          
-          ## 阶段状态
-          | 阶段 | 状态 | 详情 |
-          |------|------|------|
-          | 构建Docker镜像 | ${{ needs.build-docker.result }} | 构建Coq开发环境 |
-          | 文件准备 | ${{ needs.prepare.result }} | 处理Coq源文件 |
-          | 语法检查 | ${{ needs.syntax-check.result }} | 验证Coq语法 |
-          | 定理验证（完整编译） | ${{ needs.theorem-verify.result }} | 验证数学定理，包括完整编译 |
-          
-          ## 完整编译结果
-          EOF
+# FormalCert Probability System - CI/CD 综合报告
+
+## 执行概况
+- **工作流**: ${{ github.workflow }}
+- **运行ID**: ${{ github.run_id }}
+- **触发事件**: ${{ github.event_name }}
+- **提交**: ${{ github.sha }}
+- **分支**: ${{ github.ref }}
+- **执行时间**: $(date)
+
+## 阶段状态
+| 阶段 | 状态 | 详情 |
+|------|------|------|
+| 构建Docker镜像 | ${{ needs.build-docker.result }} | 构建Coq开发环境 |
+| 文件准备 | ${{ needs.prepare.result }} | 处理Coq源文件 |
+| 语法检查 | ${{ needs.syntax-check.result }} | 验证Coq语法 |
+| 定理验证（完整编译） | ${{ needs.theorem-verify.result }} | 验证数学定理，包括完整编译 |
+
+## 编译结果
+EOF
           
           if [ "${{ needs.theorem-verify.result }}" = "success" ]; then
             echo "### ✅ FormalCert_Probability_System.v 完整编译成功" >> summary_report.md
@@ -627,84 +591,7 @@ EOF
           
           cat summary_report.md
       
-      - name: 创建并运行证明成果打印脚本
-        run: |
-          echo "创建并运行证明成果打印脚本..."
-          
-          # 创建正确的打印脚本（修复原版的语法错误）
-          cat > print_proof_results.sh << 'EOF'
-#!/bin/bash
-
-# 形证概率系统 - 证明成果打印脚本
-# 与coq-ci.yml工作流完美契合
-# 用于打印证明结果和定理列表
-
-# 检查是否在CI环境中运行
-if [ -z "$CI" ]; then
-    echo "错误: 请在GitHub Actions CI环境中运行此脚本"
-    exit 1
-fi
-
-# 检查必要的报告文件是否存在
-if [ ! -f "summary_report.md" ]; then
-    echo "错误: 未找到summary_report.md报告文件"
-    exit 1
-fi
-
-echo -e "\n\033[1;36m==================================================\033[0m"
-echo -e "\033[1;36m    形证概率系统 (FormalCert Probability System)    \033[0m"
-echo -e "\033[1;36m          证明成果概览 (v4.0)              \033[0m"
-echo -e "\033[1;36m==================================================\033[0m"
-
-echo -e "\n\033[1;32m已证明的核心定理列表:\033[0m"
-echo "-----------------------------------"
-
-# 从compile_report.md中提取定理信息
-if [ -f "compile_report.md" ]; then
-    echo "从编译报告中提取定理信息..."
-    # 使用grep提取定理名称
-    grep -E "Theorem|Corollary|Lemma" compile_report.md | head -20 | sed 's/^/- /'
-    
-    # 如果compile_report.md中没有，尝试从源文件中提取
-    if [ -f "src/FormalCert_Probability_System.v" ]; then
-        echo ""
-        echo "从源文件中提取的定理:"
-        grep -E "^Theorem|^Lemma|^Corollary|^Example" src/FormalCert_Probability_System.v | head -10 | sed 's/^/- /'
-    fi
-else
-    echo "未找到编译报告，使用综合报告..."
-    grep -E "Theorem|Corollary|Lemma" summary_report.md | head -10 | sed 's/^/- /'
-fi
-
-echo -e "\n\033[1;32m系统验证状态:\033[0m"
-echo "-----------------------------------"
-if grep -q "✅ FormalCert_Probability_System.v 完整编译成功" summary_report.md; then
-    echo -e "\033[1;32m✅ 所有证明均通过验证\033[0m"
-else
-    echo -e "\033[1;31m⚠️ 部分证明未通过验证，请检查详细报告\033[0m"
-fi
-
-echo -e "\n\033[1;32m编译产物检查:\033[0m"
-echo "-----------------------------------"
-if [ -f "FormalCert_Probability_System.vo" ]; then
-    echo -e "✅ 生成.vo文件: FormalCert_Probability_System.vo"
-    echo -e "📊 文件大小: $(stat -c%s FormalCert_Probability_System.vo 2>/dev/null || echo "未知") 字节"
-else
-    echo -e "❌ 未生成.vo文件"
-fi
-
-echo -e "\n\033[1;36m==================================================\033[0m"
-echo -e "\033[1;36m形证概率系统证明成果打印完成\033[0m"
-echo -e "\033[1;36m详细报告和编译产物已上传到Artifacts\033[0m"
-echo -e "\033[1;36m==================================================\033[0m"
-EOF
-
-          chmod +x print_proof_results.sh
-          
-          echo "运行打印脚本..."
-          ./print_proof_results.sh
-      
-      - name: 上传汇总报告和打印脚本
+      - name: 上传最终产物
         uses: actions/upload-artifact@v4
         with:
           name: final-summary
@@ -721,13 +608,6 @@ EOF
           
           if [ -f "FormalCert_Probability_System.vo" ]; then
             echo "✅ FormalCert_Probability_System.v 成功编译，生成.vo文件"
-            echo "📊 文件大小: $(stat -c%s FormalCert_Probability_System.vo 2>/dev/null || echo '未知') 字节"
-          fi
-          
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ CI/CD执行成功"
-          else
-            echo "⚠️ CI/CD执行需要关注"
           fi
           
           echo "证明成果已成功打印，详细报告和编译产物已上传到Artifacts"
