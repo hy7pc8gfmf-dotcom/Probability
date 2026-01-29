@@ -38,7 +38,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
       
-      - name: 创建修复后的Dockerfile
+      - name: 创建Dockerfile
         run: |
           echo "创建修复后的Dockerfile..."
           
@@ -501,7 +501,7 @@ jobs:
           echo "镜像加载完成"
           rm -f coq-image.tar.gz
       
-      - name: 运行语法检查（修复导入问题）
+      - name: 运行语法检查
         run: |
           echo "在Docker容器中运行语法检查..."
           
@@ -674,7 +674,7 @@ jobs:
           echo "镜像加载完成"
           rm -f coq-image.tar.gz
       
-      - name: 智能定理验证（修复导入和ℝ符号问题）
+      - name: 智能定理验证
         run: |
           echo "运行智能定理验证..."
           
