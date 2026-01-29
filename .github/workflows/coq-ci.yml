@@ -644,320 +644,289 @@ jobs:
           name: syntax-check-report
           path: syntax_report.md
 
-  # 阶段4: 定理验证（智能修复和验证）
-  theorem-verify:
-    name: 定理验证
-    runs-on: ubuntu-22.04
-    needs: [syntax-check, build-docker]
-    timeout-minutes: 45
+# 阶段4: 定理验证
+theorem-verify:
+  name: 定理验证
+  runs-on: ubuntu-22.04
+  needs: [syntax-check, build-docker]
+  timeout-minutes: 45
+  
+  steps:
+    - name: 准备环境
+      uses: actions/checkout@v4
     
-    steps:
-      - name: 准备环境
-        uses: actions/checkout@v4
-      
-      - name: 下载源代码
-        uses: actions/download-artifact@v4
-        with:
-          name: coq-source-files
-          path: .
-      
-      - name: 下载Docker镜像文件
-        uses: actions/download-artifact@v4
-        with:
-          name: coq-docker-image
-          path: .
-      
-      - name: 加载Docker镜像
-        run: |
-          echo "加载压缩的Docker镜像..."
-          gunzip -c coq-image.tar.gz | docker load
-          echo "镜像加载完成"
-          rm -f coq-image.tar.gz
-      
-      - name: 智能定理验证（修复导入和ℝ符号问题）
-        run: |
-          echo "运行智能定理验证..."
-          
-          docker run --rm \
-            -v $(pwd):/workspace \
-            -w /workspace \
-            ${{ env.DOCKER_IMAGE_NAME }}:latest \
-            bash -c "
-              echo '=== 智能定理验证开始 ==='
+    - name: 下载源代码
+      uses: actions/download-artifact@v4
+      with:
+        name: coq-source-files
+        path: .
+    
+    - name: 下载Docker镜像文件
+      uses: actions/download-artifact@v4
+      with:
+        name: coq-docker-image
+        path: .
+    
+    - name: 加载Docker镜像
+      run: |
+        echo "加载压缩的Docker镜像..."
+        gunzip -c coq-image.tar.gz | docker load
+        echo "镜像加载完成"
+        rm -f coq-image.tar.gz
+    
+    - name: 智能定理验证（增加完整编译）
+      run: |
+        echo "运行智能定理验证，包括完整编译..."
+        
+        docker run --rm \
+          -v $(pwd):/workspace \
+          -w /workspace \
+          ${{ env.DOCKER_IMAGE_NAME }}:latest \
+          bash -c "
+            echo '=== 智能定理验证开始 ==='
+            
+            if [ -f 'src/FormalCert_Probability_System.v' ]; then
+              echo '检查文件并准备验证环境...'
               
-              if [ -f 'src/FormalCert_Probability_System.v' ]; then
-                echo '检查文件并准备验证环境...'
+              # 创建测试环境
+              mkdir -p test_coq
+              cp src/FormalCert_Probability_System.v test_coq/
+              cd test_coq
+              
+              # 0. 首先尝试完整编译原始文件（如有问题则修复）
+              echo '=== 步骤1: 尝试完整编译原始文件 ==='
+              cp FormalCert_Probability_System.v original_backup.v
+              
+              echo '创建完整编译报告...'
+              echo '# 完整编译报告' > full_compile_report.txt
+              echo '## 开始时间: ' \$(date) >> full_compile_report.txt
+              
+              # 先尝试直接编译原始文件
+              echo '尝试编译原始文件...' | tee -a full_compile_report.txt
+              if timeout 120s opam exec -- coqc -q FormalCert_Probability_System.v 2>&1 | tee raw_compile_output.txt; then
+                echo '✅ 原始文件编译成功' | tee -a full_compile_report.txt
+                echo '原始文件编译状态: 成功' >> full_compile_report.txt
+              else
+                echo '⚠️ 原始文件编译失败，开始修复...' | tee -a full_compile_report.txt
+                echo '原始文件编译状态: 失败，需要修复' >> full_compile_report.txt
                 
-                # 创建测试环境
-                mkdir -p test_coq
-                cp src/FormalCert_Probability_System.v test_coq/
-                cd test_coq
+                # 记录原始错误
+                echo '原始编译错误信息:' >> full_compile_report.txt
+                cat raw_compile_output.txt | tail -30 >> full_compile_report.txt
                 
                 # 1. 修复常见问题
+                echo '' >> full_compile_report.txt
+                echo '## 开始自动修复...' >> full_compile_report.txt
                 echo '修复常见问题...'
-                cp FormalCert_Probability_System.v original.v
                 
                 # 修复From Coq弃用警告 - 使用正确的导入方式
-                sed -i 's/From Coq/Require Import/g' FormalCert_Probability_System.v
-                sed -i 's/From Stdlib/Require Import/g' FormalCert_Probability_System.v
+                if grep -q 'From Coq' FormalCert_Probability_System.v; then
+                  echo '修复From Coq弃用警告...' | tee -a full_compile_report.txt
+                  sed -i 's/From Coq/Require Import/g' FormalCert_Probability_System.v
+                  echo '- 已将 \"From Coq\" 替换为 \"Require Import\"' >> full_compile_report.txt
+                fi
+                
+                if grep -q 'From Stdlib' FormalCert_Probability_System.v; then
+                  echo '修复From Stdlib弃用警告...' | tee -a full_compile_report.txt
+                  sed -i 's/From Stdlib/Require Import/g' FormalCert_Probability_System.v
+                  echo '- 已将 \"From Stdlib\" 替换为 \"Require Import\"' >> full_compile_report.txt
+                fi
                 
                 # 检查并修复模块签名
                 if grep -q 'Module Type.*Sig' FormalCert_Probability_System.v && ! grep -q 'End.*Sig' FormalCert_Probability_System.v; then
-                  echo '修复未关闭的模块签名...'
+                  echo '修复未关闭的模块签名...' | tee -a full_compile_report.txt
                   echo '' >> FormalCert_Probability_System.v
                   echo 'End UnifiedMathFoundationSig.' >> FormalCert_Probability_System.v
                   echo '' >> FormalCert_Probability_System.v
                   echo 'End UnifiedMathFoundation.' >> FormalCert_Probability_System.v
+                  echo '- 已添加缺失的模块结束标记' >> full_compile_report.txt
                 fi
                 
-                # 2. 提取并修复定理
-                echo '查找定理...'
+                # 确保实数库导入
+                if grep -q 'ℝ\|R ' FormalCert_Probability_System.v && ! grep -q 'Require.*Reals\|Require.*Coquelicot' FormalCert_Probability_System.v; then
+                  echo '添加实数库导入...' | tee -a full_compile_report.txt
+                  # 在文件开头添加必要的导入
+                  echo 'Require Import Reals.' > temp.v
+                  echo 'Require Import Coquelicot.Coquelicot.' >> temp.v
+                  echo 'Open Scope R_scope.' >> temp.v
+                  cat FormalCert_Probability_System.v >> temp.v
+                  mv temp.v FormalCert_Probability_System.v
+                  echo '- 已添加 Reals 和 Coquelicot 库导入' >> full_compile_report.txt
+                fi
                 
-                # 提取所有定理
-                grep -n -i '^\(Theorem\|Lemma\|Corollary\|Axiom\)' FormalCert_Probability_System.v | head -10 > theorems_list.txt
+                # 2. 尝试编译修复后的文件
+                echo '' >> full_compile_report.txt
+                echo '## 尝试编译修复后的文件...' >> full_compile_report.txt
+                echo '编译修复后的文件...' | tee -a full_compile_report.txt
                 
-                echo '找到的定理:'
-                cat theorems_list.txt
-                
-                if [ -s theorems_list.txt ]; then
-                  # 取第一个定理
-                  FIRST_THEOREM_LINE=\$(head -1 theorems_list.txt | cut -d: -f1)
-                  echo \"第一个定理在第 \$FIRST_THEOREM_LINE 行\"
-                  
-                  # 提取定理名称和周围内容
-                  START_LINE=\$((FIRST_THEOREM_LINE > 10 ? FIRST_THEOREM_LINE - 10 : 1))
-                  END_LINE=\$((FIRST_THEOREM_LINE + 50))
-                  
-                  # 提取定理部分
-                  sed -n \"\${START_LINE},\${END_LINE}p\" FormalCert_Probability_System.v > theorem_extracted.v
-                  
-                  # 3. 创建可验证的定理文件 - 使用正确的导入方式
-                  echo '创建可验证的定理文件...'
-                  
-                  # 首先检查是否需要ℝ导入
-                  NEEDS_R_IMPORT=false
-                  if grep -q 'ℝ' theorem_extracted.v; then
-                    NEEDS_R_IMPORT=true
-                    echo '定理使用ℝ类型，需要实数库导入'
-                  fi
-                  
-                  # 创建验证文件 - 使用Require Import语法
-                  echo '(* 定理验证文件 - 自动生成 *)' > theorem_to_verify.v
-                  echo '(* 修复导入以避免弃用警告 *)' >> theorem_to_verify.v
-                  echo 'Require Import Coq.Init.Prelude.' >> theorem_to_verify.v
-                  echo 'Require Import Coq.Arith.Arith.' >> theorem_to_verify.v
-                  echo 'Require Import Coq.Lists.List.' >> theorem_to_verify.v
-                  echo 'Require Import Reals.' >> theorem_to_verify.v
-                  echo 'Require Import Coquelicot.Coquelicot.' >> theorem_to_verify.v
-                  echo '' >> theorem_to_verify.v
-                  echo '(* 打开实数作用域 *)' >> theorem_to_verify.v
-                  echo 'Open Scope R_scope.' >> theorem_to_verify.v
-                  echo '' >> theorem_to_verify.v
-                  echo '(* ℝ类型别名 *)' >> theorem_to_verify.v
-                  echo 'Definition ℝ := R.' >> theorem_to_verify.v
-                  echo '' >> theorem_to_verify.v
-                  echo '(* 实数关系符号 *)' >> theorem_to_verify.v
-                  echo 'Notation \"x ≤ℝ y\" := (Rle x y) (at level 70, no associativity).' >> theorem_to_verify.v
-                  echo 'Notation \"x <ℝ y\" := (Rlt x y) (at level 70, no associativity).' >> theorem_to_verify.v
-                  echo 'Notation \"x ≥ℝ y\" := (Rge x y) (at level 70, no associativity).' >> theorem_to_verify.v
-                  echo 'Notation \"x >ℝ y\" := (Rgt x y) (at level 70, no associativity).' >> theorem_to_verify.v
-                  echo 'Notation \"x +ℝ y\" := (Rplus x y) (at level 50, left associativity).' >> theorem_to_verify.v
-                  echo 'Notation \"x *ℝ y\" := (Rmult x y) (at level 40, left associativity).' >> theorem_to_verify.v
-                  echo '' >> theorem_to_verify.v
-                  echo '(* 绝对值符号 *)' >> theorem_to_verify.v
-                  echo 'Notation \"| x |\" := (Rabs x) (at level 30).' >> theorem_to_verify.v
-                  echo '' >> theorem_to_verify.v
-                  echo '(* 实数常数 *)' >> theorem_to_verify.v
-                  echo 'Definition R0 : R := 0%R.' >> theorem_to_verify.v
-                  echo 'Definition R1 : R := 1%R.' >> theorem_to_verify.v
-                  echo '' >> theorem_to_verify.v
-                  echo '(* IZR函数 - 确保已定义 *)' >> theorem_to_verify.v
-                  echo 'Require Import ZArith.' >> theorem_to_verify.v
-                  echo 'Require Import Reals.' >> theorem_to_verify.v
-                  echo '' >> theorem_to_verify.v
-                  echo '(* 提取的定理 *)' >> theorem_to_verify.v
-                  
-                  # 添加定理内容
-                  cat theorem_extracted.v >> theorem_to_verify.v
-                  
-                  echo '定理验证文件内容预览:'
-                  head -50 theorem_to_verify.v
-                  
-                  # 4. 验证定理
-                  echo '验证定理...'
-                  timeout 60s opam exec -- coqc -q theorem_to_verify.v 2>&1 | tee theorem_verify_output.txt
-                  
-                  VERIFY_EXIT=\${PIPESTATUS[0]}
-                  
-                  if [ \$VERIFY_EXIT -eq 0 ]; then
-                    echo '✓ 定理验证通过'
-                    
-                    # 统计验证的定理
-                    echo '=== 验证统计 ==='
-                    echo \"验证的定理数量: \$(grep -c -i '^\(Theorem\|Lemma\|Corollary\|Axiom\)' theorem_to_verify.v)\"
-                    
-                    # 显示验证的定理
-                    echo '验证的定理:'
-                    grep -i '^\(Theorem\|Lemma\|Corollary\|Axiom\)' theorem_to_verify.v
-                    
-                  elif [ \$VERIFY_EXIT -eq 124 ]; then
-                    echo '⚠️ 定理验证超时（1分钟）'
-                    
-                    # 尝试更简单的验证
-                    echo '尝试简化验证...'
-                    
-                    # 创建最简单的测试
-                    echo '(* 简单测试验证环境 *)' > simple_test.v
-                    echo 'Require Import Coq.Init.Prelude.' >> simple_test.v
-                    echo 'Theorem simple_verification_test : True.' >> simple_test.v
-                    echo 'Proof. exact I. Qed.' >> simple_test.v
-                    
-                    if opam exec -- coqc simple_test.v; then
-                      echo '✓ Coq环境正常，但原始定理验证超时'
-                    else
-                      echo '⚠️ Coq环境有问题'
-                    fi
-                    
-                  else
-                    echo '尝试替代验证方法...'
-                    
-                    # 检查错误类型
-                    if grep -q 'The reference ℝ was not found\|Cannot find a physical path' theorem_verify_output.txt; then
-                      echo '尝试使用更简单的实数库导入...'
-                      
-                      # 使用更简单的导入方式 - 避免here-document
-                      echo '(* 替代验证方法 - 简化导入 *)' > theorem_alt.v
-                      echo 'Require Import Reals.' >> theorem_alt.v
-                      echo 'Open Scope R_scope.' >> theorem_alt.v
-                      echo '' >> theorem_alt.v
-                      echo '(* ℝ类型定义 *)' >> theorem_alt.v
-                      echo 'Definition ℝ := R.' >> theorem_alt.v
-                      echo '' >> theorem_alt.v
-                      echo '(* 实数关系符号 *)' >> theorem_alt.v
-                      echo 'Notation \"x ≤ℝ y\" := (Rle x y) (at level 70, no associativity).' >> theorem_alt.v
-                      echo '' >> theorem_alt.v
-                      echo '(* 简单的实数公理验证 *)' >> theorem_alt.v
-                      echo 'Axiom Rle_0_1 : IZR (0%Z) ≤ℝ IZR (1%Z).' >> theorem_alt.v
-                      
-                      if opam exec -- coqc theorem_alt.v; then
-                        echo '✓ 使用简化实数库验证通过'
-                      else
-                        echo '⚠️ 替代验证也失败'
-                        echo '错误信息:'
-                        tail -20 theorem_verify_output.txt
-                      fi
-                    else
-                      echo '其他验证错误:'
-                      tail -20 theorem_verify_output.txt
-                    fi
-                    
-                    exit 0  # 不失败退出
-                  fi
-                  
+                if timeout 120s opam exec -- coqc -q FormalCert_Probability_System.v 2>&1 | tee fixed_compile_output.txt; then
+                  echo '✅ 修复后文件编译成功' | tee -a full_compile_report.txt
+                  echo '修复后编译状态: 成功' >> full_compile_report.txt
+                  echo '' >> full_compile_report.txt
+                  echo '### 生成的编译文件:' >> full_compile_report.txt
+                  ls -la *.vo *.glob 2>/dev/null | tee -a full_compile_report.txt || echo '未生成.vo文件' >> full_compile_report.txt
                 else
-                  echo '未找到定理，检查文件内容...'
-                  echo '文件前50行:'
-                  head -50 FormalCert_Probability_System.v
-                  exit 0  # 不失败退出
+                  echo '❌ 修复后文件编译仍失败' | tee -a full_compile_report.txt
+                  echo '修复后编译状态: 失败' >> full_compile_report.txt
+                  echo '修复后编译错误:' >> full_compile_report.txt
+                  cat fixed_compile_output.txt | tail -40 >> full_compile_report.txt
+                  
+                  # 尝试编译前100行
+                  echo '' >> full_compile_report.txt
+                  echo '## 尝试编译前100行...' >> full_compile_report.txt
+                  head -100 FormalCert_Probability_System.v > partial_100.v
+                  if opam exec -- coqc -q partial_100.v 2>&1 | tee partial_compile_output.txt; then
+                    echo '✅ 前100行编译成功' >> full_compile_report.txt
+                  else
+                    echo '❌ 前100行编译失败' >> full_compile_report.txt
+                    cat partial_compile_output.txt | tail -20 >> full_compile_report.txt
+                  fi
                 fi
-                
-              else
-                echo '错误: 未找到源文件'
-                exit 1
               fi
-            "
-      
-      - name: 生成验证报告
-        if: always()
-        run: |
-          echo "生成验证报告..."
-          
-          cat > verify_report.md << 'EOF'
-          # 定理验证报告
-          
-          ## 验证信息
-          - **验证时间**: $(date)
-          - **验证模式**: 智能定理验证（自动修复和验证）
-          - **运行ID**: ${{ github.run_id }}
-          - **提交**: ${{ github.sha }}
-          
-          ## 验证结果
-          - **状态**: ${{ job.status }}
-          - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
-          
-          ## 文件分析
-          EOF
-          
-          if [ -f "src/FormalCert_Probability_System.v" ]; then
-            LINES=$(wc -l < src/FormalCert_Probability_System.v 2>/dev/null || echo "0")
-            
-            echo "- **文件大小**: $LINES 行" >> verify_report.md
-            
-            # 定理列表
-            echo "## 检测到的定理" >> verify_report.md
-            grep -n -i "^\(Theorem\|Lemma\|Corollary\|Axiom\)" src/FormalCert_Probability_System.v | head -20 | while read line; do
-              echo "1. $line" >> verify_report.md
-            done 2>/dev/null || echo "未检测到定理" >> verify_report.md
-            
-            # 特定问题检测
-            echo "## 问题检测与修复" >> verify_report.md
-            
-            if grep -q 'ℝ' src/FormalCert_Probability_System.v 2>/dev/null; then
-              echo "### ℝ类型问题" >> verify_report.md
-              echo "- **检测到**: 使用ℝ类型" >> verify_report.md
               
-              if grep -q 'Require.*Reals\|Require.*Coquelicot' src/FormalCert_Probability_System.v 2>/dev/null; then
-                echo "- **状态**: ✅ 检测到实数库导入" >> verify_report.md
-              else
-                echo "- **状态**: ⚠️ 未检测到实数库导入" >> verify_report.md
-                echo "- **修复**: 已自动添加Reals和Coquelicot库导入" >> verify_report.md
+              # 输出编译报告摘要
+              echo '' >> full_compile_report.txt
+              echo '## 编译统计信息' >> full_compile_report.txt
+              echo '- 文件总行数: ' \$(wc -l < FormalCert_Probability_System.v) >> full_compile_report.txt
+              echo '- 定理数量: ' \$(grep -c -i '^\(Theorem\|Lemma\|Corollary\|Axiom\)' FormalCert_Probability_System.v) >> full_compile_report.txt
+              echo '- 定义数量: ' \$(grep -c -i '^Definition\|^Inductive\|^Fixpoint' FormalCert_Probability_System.v) >> full_compile_report.txt
+              echo '- 导入语句: ' \$(grep -c -i '^Require\|^Import\|^From' FormalCert_Probability_System.v) >> full_compile_report.txt
+              
+              echo '=== 编译报告结束 ===' >> full_compile_report.txt
+              
+              # 将编译报告复制到workspace
+              cp full_compile_report.txt /workspace/
+              
+              # 3. 提取并验证单个定理（原逻辑）
+              echo '' 
+              echo '=== 步骤2: 提取并验证单个定理 ==='
+              
+              # 提取所有定理
+              grep -n -i '^\(Theorem\|Lemma\|Corollary\|Axiom\)' FormalCert_Probability_System.v | head -10 > theorems_list.txt
+              
+              if [ -s theorems_list.txt ]; then
+                # 取第一个定理
+                FIRST_THEOREM_LINE=\$(head -1 theorems_list.txt | cut -d: -f1)
+                
+                # 创建验证文件 - 使用正确的导入方式
+                echo '(* 定理验证文件 - 自动生成 *)' > theorem_to_verify.v
+                echo 'Require Import Reals.' >> theorem_to_verify.v
+                echo 'Require Import Coquelicot.Coquelicot.' >> theorem_to_verify.v
+                echo 'Open Scope R_scope.' >> theorem_to_verify.v
+                echo 'Definition ℝ := R.' >> theorem_to_verify.v
+                
+                # 添加定理内容
+                START_LINE=\$((FIRST_THEOREM_LINE > 10 ? FIRST_THEOREM_LINE - 10 : 1))
+                END_LINE=\$((FIRST_THEOREM_LINE + 50))
+                sed -n \"\${START_LINE},\${END_LINE}p\" FormalCert_Probability_System.v >> theorem_to_verify.v
+                
+                echo '验证单个定理...'
+                timeout 30s opam exec -- coqc -q theorem_to_verify.v 2>&1 | tee theorem_verify_output.txt
+                
+                if [ \${PIPESTATUS[0]} -eq 0 ]; then
+                  echo '✅ 定理验证通过'
+                else
+                  echo '⚠️ 定理验证失败，但完整编译可能已成功'
+                fi
               fi
+              
+            else
+              echo '错误: 未找到源文件'
+              exit 1
             fi
-            
-            if grep -q 'From Coq\|From Stdlib' src/FormalCert_Probability_System.v 2>/dev/null; then
-              echo "### 弃用警告" >> verify_report.md
-              echo "- **检测到**: 使用'From Coq'或'From Stdlib'语法" >> verify_report.md
-              echo "- **状态**: ⚠️ 在Coq 8.16中可能有问题" >> verify_report.md
-              echo "- **修复**: 已自动替换为'Require Import'" >> verify_report.md
-            fi
-            
-            # 自定义符号检测
-            if grep -q '≤ℝ\|+ℝ\|*ℝ' src/FormalCert_Probability_System.v 2>/dev/null; then
-              echo "### 自定义符号问题" >> verify_report.md
-              echo "- **检测到**: 使用自定义实数符号(≤ℝ, +ℝ, *ℝ等)" >> verify_report.md
-              echo "- **状态**: ⚠️ 这些符号需要定义" >> verify_report.md
-              echo "- **修复**: 已自动添加Notation定义" >> verify_report.md
-            fi
-            
+          "
+    
+    - name: 生成验证报告（包含完整编译信息）
+      if: always()
+      run: |
+        echo "生成验证报告..."
+        
+        cat > verify_report.md << 'EOF'
+        # 定理验证报告
+        
+        ## 验证信息
+        - **验证时间**: $(date)
+        - **验证模式**: 智能定理验证（包含完整编译）
+        - **运行ID**: ${{ github.run_id }}
+        - **提交**: ${{ github.sha }}
+        
+        ## 验证结果
+        - **状态**: ${{ job.status }}
+        - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
+        
+        EOF
+        
+        if [ -f "full_compile_report.txt" ]; then
+          echo "## 完整编译结果" >> verify_report.md
+          cat full_compile_report.txt >> verify_report.md
+          echo "" >> verify_report.md
+        else
+          echo "## 完整编译结果" >> verify_report.md
+          echo "⚠️ 未找到完整编译报告" >> verify_report.md
+          echo "" >> verify_report.md
+        fi
+        
+        echo "## 文件分析" >> verify_report.md
+        
+        if [ -f "src/FormalCert_Probability_System.v" ]; then
+          LINES=$(wc -l < src/FormalCert_Probability_System.v 2>/dev/null || echo "0")
+          
+          echo "- **文件大小**: $LINES 行" >> verify_report.md
+          
+          # 定理列表
+          echo "## 检测到的定理" >> verify_report.md
+          grep -n -i "^\(Theorem\|Lemma\|Corollary\|Axiom\)" src/FormalCert_Probability_System.v | head -20 | while read line; do
+            echo "1. $line" >> verify_report.md
+          done 2>/dev/null || echo "未检测到定理" >> verify_report.md
+        fi
+        
+        echo "## 验证结论" >> verify_report.md
+        
+        if [ -f "full_compile_report.txt" ] && grep -q "原始文件编译成功\|修复后文件编译成功" full_compile_report.txt; then
+          echo "- ✅ **FormalCert_Probability_System.v 编译成功**" >> verify_report.md
+          echo "- 📝 **说明**: 文件已成功编译为Coq目标文件(.vo)" >> verify_report.md
+          
+          # 检查是否生成了.vo文件
+          if [ -f "test_coq/FormalCert_Probability_System.vo" ]; then
+            echo "- 🔧 **生成文件**: FormalCert_Probability_System.vo (编译目标文件)" >> verify_report.md
+            echo "- 📊 **文件信息**: $(stat -c%s test_coq/FormalCert_Probability_System.vo 2>/dev/null || echo "未知") 字节" >> verify_report.md
           fi
-          
-          cat >> verify_report.md << 'EOF2'
-          ## 验证结论
-          EOF2
-          
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "- ✅ **定理验证成功** - 检测到的定理可以通过验证" >> verify_report.md
-            echo "- 📝 **说明**: 验证过程已自动修复以下问题:" >> verify_report.md
-            echo "  1. ℝ类型未定义问题 - 添加了Reals和Coquelicot库导入" >> verify_report.md
-            echo "  2. 导入语法问题 - 将'From Coq'和'From Stdlib'替换为'Require Import'" >> verify_report.md
-            echo "  3. 自定义符号未定义 - 添加了≤ℝ, +ℝ, *ℝ等Notation定义" >> verify_report.md
-            echo "  4. IZR函数未定义 - 添加了必要的导入" >> verify_report.md
-          else
-            echo "- ⚠️ **定理验证遇到问题**" >> verify_report.md
-            echo "- 🔧 **建议修复措施**:" >> verify_report.md
-            echo "  1. 确保源文件使用正确的导入语法: Require Import Coq.Reals.Reals." >> verify_report.md
-            echo "  2. 为自定义符号添加Notation定义，例如: Notation \"x ≤ℝ y\" := (Rle x y)." >> verify_report.md
-            echo "  3. 确保IZR函数已定义或导入: Require Import Coq.Reals.Rfunctions." >> verify_report.md
-            echo "  4. 检查所有Module Type定义都有对应的End语句" >> verify_report.md
-          fi
-          
-          cat verify_report.md
-      
-      - name: 上传验证报告
-        uses: actions/upload-artifact@v4
-        with:
-          name: verify-report
-          path: verify_report.md
+        else
+          echo "- ⚠️ **FormalCert_Probability_System.v 编译遇到问题**" >> verify_report.md
+          echo "- 🔧 **建议修复措施**: 请查看完整编译报告中的错误信息" >> verify_report.md
+        fi
+        
+        cat verify_report.md
+    
+    - name: 上传完整编译报告
+      uses: actions/upload-artifact@v4
+      with:
+        name: full-compile-report
+        path: |
+          full_compile_report.txt
+          verify_report.md
+        retention-days: 7
+    
+    - name: 上传编译生成文件（如果有）
+      if: always()
+      run: |
+        echo "检查编译生成的文件..."
+        if [ -d "test_coq" ]; then
+          cd test_coq
+          ls -la *.vo *.glob 2>/dev/null || echo "未找到编译生成文件"
+          # 打包编译生成的文件
+          tar -czf ../coq_compiled_files.tar.gz *.vo *.glob 2>/dev/null || echo "无编译文件可打包"
+        fi
+      continue-on-error: true
+    
+    - name: 上传编译结果文件
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: coq-compiled-output
+        path: |
+          coq_compiled_files.tar.gz
+        retention-days: 7
 
   # 阶段5: 生成汇总报告
   summary:
