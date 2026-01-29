@@ -1,0 +1,8 @@
+- name: 打印证明成果
+  run: |
+    if [ -f "print_proof_results.sh" ]; then
+      chmod +x print_proof_results.sh
+      ./print_proof_results.sh
+    else
+      echo "打印脚本不存在，跳过打印步骤"
+    fi
