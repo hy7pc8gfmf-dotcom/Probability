@@ -162,12 +162,12 @@ jobs:
           
           # 验证安装的库，特别是包含ℝ的库 - 使用正确的语法
           RUN echo "测试ℝ类型是否可用..." && \
-              echo 'From Stdlib Require Import Reals. Open Scope R_scope. Definition test_R : R := 0%R.' > test_R.v && \
+              echo 'From Coq Require Import Reals. Open Scope R_scope. Definition test_R : R := 0%R.' > test_R.v && \
               opam exec -- coqc test_R.v && echo "✓ Reals库可用" || echo "⚠️ Reals库有问题"
           
           # 验证Coquelicot库 - 使用正确的语法
           RUN echo "测试Coquelicot库是否可用..." && \
-              echo 'From Stdlib Require Import Reals. Require Import Coquelicot.Coquelicot. Open Scope R_scope. Definition test_R2 : R := 1%R.' > test_coquelicot.v && \
+              echo 'From Coq Require Import Reals. Require Import Coquelicot.Coquelicot. Open Scope R_scope. Definition test_R2 : R := 1%R.' > test_coquelicot.v && \
               opam exec -- coqc test_coquelicot.v && echo "✓ Coquelicot库可用" || echo "⚠️ Coquelicot库有问题"
           
           # 设置默认命令
@@ -501,7 +501,7 @@ jobs:
           echo "镜像加载完成"
           rm -f coq-image.tar.gz
       
-      - name: 运行语法检查（修复导入问题）
+      - name: 运行语法检查（使用原始文件）
         run: |
           echo "在Docker容器中运行语法检查..."
           
@@ -513,64 +513,37 @@ jobs:
             -v $(pwd)/coq_workspace:/workspace \
             -w /workspace \
             ${{ env.DOCKER_IMAGE_NAME }}:latest \
-            bash -c "
-              echo '=== Coq环境检查 ==='
+            bash -c '
+              echo "=== Coq环境检查 ==="
               
               # 检查基本命令
-              opam exec -- which coqc && opam exec -- coqc --version || echo 'coqc未安装'
-              opam exec -- which coqtop && opam exec -- coqtop --version || echo 'coqtop未安装'
+              opam exec -- which coqc && opam exec -- coqc --version || echo "coqc未安装"
+              opam exec -- which coqtop && opam exec -- coqtop --version || echo "coqtop未安装"
               
-              echo '=== 文件检查 ==='
+              echo "=== 文件检查 ==="
               ls -la /workspace/src/
               
-              if [ -f '/workspace/src/FormalCert_Probability_System.v' ]; then
-                echo '开始语法检查...'
+              if [ -f "/workspace/src/FormalCert_Probability_System.v" ]; then
+                echo "开始语法检查..."
                 
                 cd src
                 
-                # 修复From Coq弃用警告
-                if grep -q 'From Coq' FormalCert_Probability_System.v; then
-                  echo '修复From Coq弃用警告...'
-                  sed -i 's/From Coq/Require Import/g' FormalCert_Probability_System.v
-                fi
-                
-                # 修复From Stdlib弃用警告
-                if grep -q 'From Stdlib' FormalCert_Probability_System.v; then
-                  echo '修复From Stdlib弃用警告...'
-                  sed -i 's/From Stdlib/Require Import/g' FormalCert_Probability_System.v
-                fi
-                
-                # 确保ℝ的导入
-                if grep -q 'ℝ\|R ' FormalCert_Probability_System.v; then
-                  echo '检测到实数使用，确保实数库导入...'
-                  if ! grep -q 'Require.*Reals\|Require.*Coquelicot' FormalCert_Probability_System.v; then
-                    echo '添加实数库导入...'
-                    # 在文件开头添加必要的导入
-                    echo 'Require Import Reals.' > temp.v
-                    echo 'Require Import Coquelicot.Coquelicot.' >> temp.v
-                    echo 'Open Scope R_scope.' >> temp.v
-                    cat FormalCert_Probability_System.v >> temp.v
-                    mv temp.v FormalCert_Probability_System.v
-                  fi
-                fi
-                
-                # 尝试编译前50行
-                echo '编译前50行...'
+                echo "编译前50行..."
                 head -50 FormalCert_Probability_System.v > test_partial.v
                 
                 if opam exec -- coqc -q test_partial.v 2>&1; then
-                  echo '✓ 语法检查通过（前50行）'
+                  echo "✓ 语法检查通过（前50行）"
                 else
-                  echo '⚠️ 文件可能有语法错误'
-                  echo '显示前20行内容:'
+                  echo "⚠️ 文件可能有语法错误"
+                  echo "显示前20行内容:"
                   head -20 FormalCert_Probability_System.v
                 fi
                 
               else
-                echo '错误: 未找到Coq源文件'
+                echo "错误: 未找到Coq源文件"
                 exit 1
               fi
-            "
+            '
       
       - name: 生成语法检查报告
         if: always()
@@ -622,9 +595,9 @@ jobs:
               fi
             fi
             
-            if grep -q 'From Coq\|From Stdlib' src/FormalCert_Probability_System.v 2>/dev/null; then
-              echo "- **弃用语法**: 检测到From Coq/Stdlib语法" >> syntax_report.md
-              echo "  - ⚠️ 这是Coq 8.16+的弃用语法" >> syntax_report.md
+            if grep -q 'From Stdlib' src/FormalCert_Probability_System.v 2>/dev/null; then
+              echo "- **Stdlib逻辑路径**: 检测到From Stdlib语法" >> syntax_report.md
+              echo "  - ⚠️ Stdlib是逻辑路径，可能需要修复" >> syntax_report.md
             fi
             
           else
@@ -644,12 +617,12 @@ jobs:
           name: syntax-check-report
           path: syntax_report.md
 
-  # 阶段4: 定理验证（智能修复和验证，包含完整编译）
+  # 阶段4: 定理验证（完整编译检查）
   theorem-verify:
-    name: 定理验证（包含完整编译）
+    name: 定理验证（完整编译）
     runs-on: ubuntu-22.04
     needs: [syntax-check, build-docker]
-    timeout-minutes: 60  # 增加超时时间，因为要完整编译
+    timeout-minutes: 60
     
     steps:
       - name: 准备环境
@@ -674,19 +647,19 @@ jobs:
           echo "镜像加载完成"
           rm -f coq-image.tar.gz
       
-      - name: 智能定理验证（包含完整编译检查 - 修复版）
+      - name: 完整编译检查（修复Stdlib问题）
         run: |
-          echo "运行智能定理验证，包含完整编译检查（修复版）..."
+          echo "运行完整编译检查（修复Stdlib问题）..."
           
           docker run --rm \
             -v $(pwd):/workspace \
             -w /workspace \
             ${{ env.DOCKER_IMAGE_NAME }}:latest \
             bash -c '
-              echo "=== 定理验证开始（包含完整编译） ==="
+              echo "=== 完整编译检查开始 ==="
               
               if [ -f "src/FormalCert_Probability_System.v" ]; then
-                echo "检查文件并准备验证环境..."
+                echo "检查文件并准备编译环境..."
                 
                 # 创建测试环境
                 mkdir -p test_coq
@@ -699,70 +672,78 @@ jobs:
                 echo "=== 步骤1: 创建备份和修复版本 ==="
                 cp FormalCert_Probability_System.v original_backup.v
                 
-                # 创建修复后的版本
+                # 创建修复后的版本 - 修复Stdlib问题
+                echo "创建修复版本（处理Stdlib逻辑路径问题）..."
                 cp FormalCert_Probability_System.v fixed.v
                 
-                # 修复From Coq弃用警告
-                if grep -q "From Coq" fixed.v; then
-                  echo "修复From Coq弃用警告..."
-                  sed -i "s/From Coq/Require Import/g" fixed.v
+                # 修复From Stdlib问题 - 在Coq 8.16中，Stdlib是逻辑路径
+                # 将所有"From Stdlib Require Import"替换为"From Coq Require Import"
+                if grep -q "From Stdlib Require Import" fixed.v; then
+                  echo "修复From Stdlib逻辑路径问题..."
+                  sed -i "s/From Stdlib Require Import/From Coq Require Import/g" fixed.v
                 fi
                 
-                # 修复From Stdlib弃用警告
-                if grep -q "From Stdlib" fixed.v; then
-                  echo "修复From Stdlib弃用警告..."
-                  sed -i "s/From Stdlib/Require Import/g" fixed.v
+                # 修复单独的"From Stdlib"
+                if grep -q "^From Stdlib$" fixed.v; then
+                  echo "修复单独的From Stdlib语句..."
+                  sed -i "s/^From Stdlib$/From Coq/g" fixed.v
                 fi
                 
-                # 确保ℝ的导入
+                # 确保实数库导入
                 if grep -q "ℝ" fixed.v; then
-                  echo "检测到ℝ类型使用，确保实数库导入..."
-                  if ! grep -q "Require.*Reals\|Require.*Coquelicot" fixed.v; then
+                  echo "检测到ℝ类型使用..."
+                  if ! grep -q "Require.*Reals\|Require.*Coquelicot\|From.*Reals" fixed.v; then
                     echo "添加实数库导入到文件开头..."
+                    # 保存原始内容
+                    cp fixed.v fixed_orig.v
                     # 在文件开头添加必要的导入
-                    echo "Require Import Reals." > temp_fixed.v
-                    echo "Require Import Coquelicot.Coquelicot." >> temp_fixed.v
-                    echo "Open Scope R_scope." >> temp_fixed.v
-                    cat fixed.v >> temp_fixed.v
-                    mv temp_fixed.v fixed.v
+                    {
+                      echo "From Coq Require Import Reals."
+                      echo "Require Import Coquelicot.Coquelicot."
+                      echo "Open Scope R_scope."
+                      echo ""
+                      cat fixed_orig.v
+                    } > fixed.v
+                    rm -f fixed_orig.v
                   fi
                 fi
                 
-                echo "=== 步骤2: 尝试完整编译修复后的文件 ==="
-                echo "开始完整编译 fixed.v ..."
+                echo "=== 步骤2: 尝试完整编译原始文件 ==="
+                echo "开始编译原始文件 original_backup.v ..."
                 
                 # 创建编译报告文件
                 echo "# FormalCert_Probability_System.v 完整编译报告" > compile_report.md
                 echo "## 编译信息" >> compile_report.md
                 echo "- **编译开始时间**: $(date)" >> compile_report.md
                 echo "- **源文件**: FormalCert_Probability_System.v" >> compile_report.md
-                echo "- **修复后文件**: fixed.v" >> compile_report.md
+                echo "- **文件大小**: $(wc -l < original_backup.v) 行" >> compile_report.md
                 echo "" >> compile_report.md
                 
-                # 尝试编译修复后的文件
+                # 尝试编译原始文件
                 COMPILE_OUTPUT_FILE=$(mktemp)
                 COMPILE_START=$(date +%s)
                 
-                echo "## 编译输出" >> compile_report.md
+                echo "## 原始文件编译输出" >> compile_report.md
                 echo "\`\`\`" >> compile_report.md
                 
                 # 运行编译命令，捕获输出
-                if timeout 300s opam exec -- coqc -q fixed.v 2>&1 | tee "$COMPILE_OUTPUT_FILE"; then
-                  COMPILE_STATUS=0
+                echo "编译原始文件..." | tee -a compile_report.md
+                if timeout 300s opam exec -- coqc -q original_backup.v 2>&1 | tee "$COMPILE_OUTPUT_FILE"; then
+                  ORIGINAL_COMPILE_STATUS=0
                   echo "编译状态: 成功" >> compile_report.md
-                  echo "✅ fixed.v 完整编译成功！" | tee -a compile_report.md
+                  echo "✅ 原始文件编译成功！" | tee -a compile_report.md
                 else
-                  COMPILE_STATUS=$?
+                  ORIGINAL_COMPILE_STATUS=$?
                   echo "编译状态: 失败" >> compile_report.md
-                  if [ "$COMPILE_STATUS" -eq 124 ]; then
-                    echo "⚠️ fixed.v 编译超时（5分钟）" | tee -a compile_report.md
+                  if [ "$ORIGINAL_COMPILE_STATUS" -eq 124 ]; then
+                    echo "⚠️ 原始文件编译超时（5分钟）" | tee -a compile_report.md
                   else
-                    echo "❌ fixed.v 编译失败" | tee -a compile_report.md
+                    echo "❌ 原始文件编译失败" | tee -a compile_report.md
                   fi
                 fi
                 
                 COMPILE_END=$(date +%s)
-                COMPILE_TIME=$((COMPILE_END - COMPILE_START))
+                ORIGINAL_COMPILE_TIME=$((COMPILE_END - COMPILE_START))
                 
                 echo "\`\`\`" >> compile_report.md
                 echo "" >> compile_report.md
@@ -774,9 +755,71 @@ jobs:
                 
                 # 检查是否生成了编译文件
                 echo "## 生成的文件" >> compile_report.md
+                if [ -f "original_backup.vo" ]; then
+                  echo "- ✅ original_backup.vo: 已生成（编译成功）" >> compile_report.md
+                  echo "- 📊 文件大小: $(stat -c%s original_backup.vo 2>/dev/null || echo "未知") 字节" >> compile_report.md
+                else
+                  echo "- ❌ original_backup.vo: 未生成（编译失败）" >> compile_report.md
+                fi
+                
+                if [ -f "original_backup.glob" ]; then
+                  echo "- ✅ original_backup.glob: 已生成" >> compile_report.md
+                else
+                  echo "- ❌ original_backup.glob: 未生成" >> compile_report.md
+                fi
+                
+                echo "" >> compile_report.md
+                echo "## 编译统计" >> compile_report.md
+                echo "- **编译时间**: ${ORIGINAL_COMPILE_TIME}秒" >> compile_report.md
+                echo "- **源文件大小**: $(wc -l < original_backup.v) 行" >> compile_report.md
+                
+                if [ "$ORIGINAL_COMPILE_STATUS" -eq 0 ]; then
+                  echo "- **编译结果**: ✅ 成功" >> compile_report.md
+                else
+                  echo "- **编译结果**: ❌ 失败" >> compile_report.md
+                fi
+                
+                echo "" >> compile_report.md
+                echo "=== 步骤3: 尝试编译修复后的文件 ==="
+                echo "开始编译修复后的文件 fixed.v ..." >> compile_report.md
+                
+                FIXED_COMPILE_OUTPUT_FILE=$(mktemp)
+                FIXED_COMPILE_START=$(date +%s)
+                
+                echo "## 修复后文件编译输出" >> compile_report.md
+                echo "\`\`\`" >> compile_report.md
+                
+                echo "编译修复后的文件..." | tee -a compile_report.md
+                if timeout 300s opam exec -- coqc -q fixed.v 2>&1 | tee "$FIXED_COMPILE_OUTPUT_FILE"; then
+                  FIXED_COMPILE_STATUS=0
+                  echo "编译状态: 成功" >> compile_report.md
+                  echo "✅ 修复后文件编译成功！" | tee -a compile_report.md
+                else
+                  FIXED_COMPILE_STATUS=$?
+                  echo "编译状态: 失败" >> compile_report.md
+                  if [ "$FIXED_COMPILE_STATUS" -eq 124 ]; then
+                    echo "⚠️ 修复后文件编译超时（5分钟）" | tee -a compile_report.md
+                  else
+                    echo "❌ 修复后文件编译失败" | tee -a compile_report.md
+                  fi
+                fi
+                
+                FIXED_COMPILE_END=$(date +%s)
+                FIXED_COMPILE_TIME=$((FIXED_COMPILE_END - FIXED_COMPILE_START))
+                
+                echo "\`\`\`" >> compile_report.md
+                echo "" >> compile_report.md
+                
+                # 添加修复后编译输出到报告
+                echo "## 修复后文件详细编译输出" >> compile_report.md
+                cat "$FIXED_COMPILE_OUTPUT_FILE" >> compile_report.md
+                echo "" >> compile_report.md
+                
+                # 检查是否生成了修复后文件的编译文件
+                echo "## 修复后文件生成的文件" >> compile_report.md
                 if [ -f "fixed.vo" ]; then
                   echo "- ✅ fixed.vo: 已生成（编译成功）" >> compile_report.md
-                  echo "- 📊 文件大小: $(stat -c%s fixed.vo) 字节" >> compile_report.md
+                  echo "- 📊 文件大小: $(stat -c%s fixed.vo 2>/dev/null || echo "未知") 字节" >> compile_report.md
                 else
                   echo "- ❌ fixed.vo: 未生成（编译失败）" >> compile_report.md
                 fi
@@ -788,35 +831,23 @@ jobs:
                 fi
                 
                 echo "" >> compile_report.md
-                echo "## 编译统计" >> compile_report.md
-                echo "- **编译时间**: ${COMPILE_TIME}秒" >> compile_report.md
-                echo "- **源文件大小**: $(wc -l < fixed.v) 行" >> compile_report.md
+                echo "## 修复后文件编译统计" >> compile_report.md
+                echo "- **编译时间**: ${FIXED_COMPILE_TIME}秒" >> compile_report.md
                 
-                if [ "$COMPILE_STATUS" -eq 0 ]; then
+                if [ "$FIXED_COMPILE_STATUS" -eq 0 ]; then
                   echo "- **编译结果**: ✅ 成功" >> compile_report.md
                 else
                   echo "- **编译结果**: ❌ 失败" >> compile_report.md
                 fi
                 
-                # 尝试编译原始文件（如果有时间）
-                echo "" >> compile_report.md
-                echo "## 原始文件编译尝试" >> compile_report.md
-                
-                if [ -f "original_backup.v" ]; then
-                  echo "尝试编译原始文件..." >> compile_report.md
-                  if timeout 60s opam exec -- coqc -q original_backup.v 2>&1 | tail -20; then
-                    echo "- ✅ 原始文件编译成功" >> compile_report.md
-                  else
-                    echo "- ⚠️ 原始文件编译失败（可能需要修复）" >> compile_report.md
-                  fi
-                fi
-                
                 echo "" >> compile_report.md
                 echo "## 文件内容统计" >> compile_report.md
-                echo "- **定理数量**: $(grep -c -i "^\(Theorem\|Lemma\|Corollary\|Axiom\)" fixed.v)" >> compile_report.md
-                echo "- **定义数量**: $(grep -c -i "^Definition\|^Inductive\|^Fixpoint" fixed.v)" >> compile_report.md
-                echo "- **导入数量**: $(grep -c -i "^Require\|^Import" fixed.v)" >> compile_report.md
-                echo "- **ℝ符号出现次数**: $(grep -c "ℝ" fixed.v)" >> compile_report.md
+                echo "- **定理数量**: $(grep -c -i "^\(Theorem\|Lemma\|Corollary\|Axiom\)" original_backup.v)" >> compile_report.md
+                echo "- **定义数量**: $(grep -c -i "^Definition\|^Inductive\|^Fixpoint" original_backup.v)" >> compile_report.md
+                echo "- **导入数量**: $(grep -c -i "^Require\|^Import\|^From" original_backup.v)" >> compile_report.md
+                echo "- **ℝ符号出现次数**: $(grep -c "ℝ" original_backup.v)" >> compile_report.md
+                echo "- **From Stdlib出现次数**: $(grep -c "From Stdlib" original_backup.v)" >> compile_report.md
+                echo "- **From Coq出现次数**: $(grep -c "From Coq" original_backup.v)" >> compile_report.md
                 
                 echo "" >> compile_report.md
                 echo "## 编译结束时间" >> compile_report.md
@@ -827,51 +858,15 @@ jobs:
                 cp compile_report.md /workspace/
                 
                 # 如果编译成功，复制生成的.vo文件
-                if [ -f "fixed.vo" ]; then
+                if [ -f "original_backup.vo" ]; then
+                  cp original_backup.vo /workspace/FormalCert_Probability_System.vo 2>/dev/null || true
+                  cp original_backup.glob /workspace/FormalCert_Probability_System.glob 2>/dev/null || true
+                elif [ -f "fixed.vo" ]; then
                   cp fixed.vo /workspace/FormalCert_Probability_System.vo 2>/dev/null || true
                   cp fixed.glob /workspace/FormalCert_Probability_System.glob 2>/dev/null || true
                 fi
                 
-                echo "=== 步骤3: 提取并验证单个定理（可选）==="
-                
-                # 只在编译成功时才进行定理验证
-                if [ "$COMPILE_STATUS" -eq 0 ]; then
-                  echo "完整编译成功，开始提取定理验证..."
-                  
-                  # 提取所有定理
-                  grep -n -i "^\(Theorem\|Lemma\|Corollary\|Axiom\)" fixed.v | head -10 > theorems_list.txt
-                  
-                  if [ -s theorems_list.txt ]; then
-                    # 取第一个定理
-                    FIRST_THEOREM_LINE=$(head -1 theorems_list.txt | cut -d: -f1)
-                    echo "第一个定理在第 $FIRST_THEOREM_LINE 行"
-                    
-                    # 创建验证文件
-                    echo "(* 定理验证文件 - 基于编译成功的fixed.v *)" > theorem_to_verify.v
-                    echo "Require Import Reals." >> theorem_to_verify.v
-                    echo "Require Import Coquelicot.Coquelicot." >> theorem_to_verify.v
-                    echo "Open Scope R_scope." >> theorem_to_verify.v
-                    echo "Definition ℝ := R." >> theorem_to_verify.v
-                    
-                    # 提取定理内容
-                    START_LINE=$((FIRST_THEOREM_LINE > 10 ? FIRST_THEOREM_LINE - 10 : 1))
-                    END_LINE=$((FIRST_THEOREM_LINE + 50))
-                    sed -n "${START_LINE},${END_LINE}p" fixed.v >> theorem_to_verify.v
-                    
-                    echo "验证单个定理..."
-                    timeout 30s opam exec -- coqc -q theorem_to_verify.v 2>&1 | tee theorem_verify_output.txt
-                    
-                    if [ ${PIPESTATUS[0]} -eq 0 ]; then
-                      echo "✅ 定理验证通过"
-                    else
-                      echo "⚠️ 定理验证失败"
-                    fi
-                  fi
-                else
-                  echo "完整编译失败，跳过定理验证"
-                fi
-                
-                echo "=== 定理验证结束 ==="
+                echo "=== 完整编译检查结束 ==="
                 
               else
                 echo "错误: 未找到源文件"
@@ -879,17 +874,17 @@ jobs:
               fi
             '
       
-      - name: 生成验证报告（包含完整编译信息）
+      - name: 生成验证报告
         if: always()
         run: |
           echo "生成验证报告..."
           
           cat > verify_report.md << 'EOF'
-          # 定理验证报告（包含完整编译）
+          # FormalCert Probability System 验证报告
           
           ## 验证信息
           - **验证时间**: $(date)
-          - **验证模式**: 智能定理验证（包含完整编译检查）
+          - **验证模式**: 完整编译检查
           - **运行ID**: ${{ github.run_id }}
           - **提交**: ${{ github.sha }}
           
@@ -937,22 +932,24 @@ jobs:
             echo "### 统计信息" >> verify_report.md
             echo "- **定理数量**: $(grep -c -i '^\(Theorem\|Lemma\|Corollary\|Axiom\)' src/FormalCert_Probability_System.v 2>/dev/null || echo '0')" >> verify_report.md
             echo "- **定义数量**: $(grep -c -i '^Definition\|^Inductive\|^Fixpoint' src/FormalCert_Probability_System.v 2>/dev/null || echo '0')" >> verify_report.md
-            echo "- **导入数量**: $(grep -c -i '^Require\|^Import' src/FormalCert_Probability_System.v 2>/dev/null || echo '0')" >> verify_report.md
+            echo "- **导入数量**: $(grep -c -i '^Require\|^Import\|^From' src/FormalCert_Probability_System.v 2>/dev/null || echo '0')" >> verify_report.md
             
             # 检查特定问题
             echo "### 问题检测" >> verify_report.md
             if grep -q 'ℝ' src/FormalCert_Probability_System.v 2>/dev/null; then
               echo "- **ℝ类型使用**: 检测到ℝ类型" >> verify_report.md
-              if grep -q 'Require.*Reals\|Require.*Coquelicot' src/FormalCert_Probability_System.v 2>/dev/null; then
+              if grep -q 'Require.*Reals\|Require.*Coquelicot\|From.*Reals' src/FormalCert_Probability_System.v 2>/dev/null; then
                 echo "  - ✅ 检测到实数库导入" >> verify_report.md
               else
                 echo "  - ⚠️ 未检测到实数库导入" >> verify_report.md
               fi
             fi
             
-            if grep -q 'From Coq\|From Stdlib' src/FormalCert_Probability_System.v 2>/dev/null; then
-              echo "- **弃用语法**: 检测到From语法" >> verify_report.md
-              echo "  - ⚠️ 建议替换为Require Import" >> verify_report.md
+            # 检查From Stdlib问题
+            if grep -q 'From Stdlib' src/FormalCert_Probability_System.v 2>/dev/null; then
+              echo "- **Stdlib逻辑路径**: 检测到From Stdlib语法" >> verify_report.md
+              echo "  - ⚠️ 在Coq 8.16中，Stdlib是逻辑路径，可能需要修复" >> verify_report.md
+              echo "  - 🔧 建议: 将'From Stdlib'替换为'From Coq'" >> verify_report.md
             fi
           fi
           
@@ -972,21 +969,21 @@ jobs:
             echo "**下一步建议**: " >> verify_report.md
             echo "1. 使用生成的.vo文件进行进一步验证" >> verify_report.md
             echo "2. 继续开发更多定理和定义" >> verify_report.md
-            echo "3. 将修复的导入语法合并到源文件中" >> verify_report.md
+            echo "3. 考虑修复'From Stdlib'语法问题（虽然编译成功，但有警告）" >> verify_report.md
           else
             echo "### ⚠️ **完整编译验证失败**" >> verify_report.md
             echo "FormalCert_Probability_System.v 编译失败，需要修复问题。" >> verify_report.md
             echo "" >> verify_report.md
             echo "**常见问题**: " >> verify_report.md
             echo "1. 缺失库导入（如Reals, Coquelicot）" >> verify_report.md
-            echo "2. 使用弃用的'From'语法" >> verify_report.md
+            echo "2. Stdlib逻辑路径问题（Coq 8.16特有）" >> verify_report.md
             echo "3. 自定义符号未定义（ℝ, ≤ℝ等）" >> verify_report.md
             echo "4. 语法错误或类型错误" >> verify_report.md
             echo "" >> verify_report.md
             echo "**修复建议**: " >> verify_report.md
             echo "1. 查看编译报告中的具体错误信息" >> verify_report.md
             echo "2. 确保所有必要的库都已导入" >> verify_report.md
-            echo "3. 替换'From'语法为'Require Import'" >> verify_report.md
+            echo "3. 修复'From Stdlib'语法问题：替换为'From Coq'" >> verify_report.md
             echo "4. 为自定义符号添加定义" >> verify_report.md
           fi
           
@@ -1063,7 +1060,7 @@ jobs:
           | 构建Docker镜像 | ${{ needs.build-docker.result }} | 构建Coq开发环境 |
           | 文件准备 | ${{ needs.prepare.result }} | 处理Coq源文件 |
           | 语法检查 | ${{ needs.syntax-check.result }} | 验证Coq语法 |
-          | 定理验证（包含完整编译） | ${{ needs.theorem-verify.result }} | 验证数学定理，包括完整编译 |
+          | 定理验证（完整编译） | ${{ needs.theorem-verify.result }} | 验证数学定理，包括完整编译 |
           
           ## 系统信息
           - **运行环境**: Ubuntu 22.04
@@ -1091,18 +1088,18 @@ jobs:
             echo "### ⚠️ FormalCert_Probability_System.v 编译需要关注" >> summary_report.md
             echo "编译过程遇到问题，需要检查以下方面：" >> summary_report.md
             echo "1. 库导入是否正确" >> summary_report.md
-            echo "2. 自定义符号是否正确定义" >> summary_report.md
-            echo "3. 语法是否有错误" >> summary_report.md
-            echo "4. 依赖是否完整" >> summary_report.md
+            echo "2. Stdlib逻辑路径问题（Coq 8.16特有）" >> summary_report.md
+            echo "3. 自定义符号是否正确定义" >> summary_report.md
+            echo "4. 语法是否有错误" >> summary_report.md
           fi
           
           echo "" >> summary_report.md
           echo "## 关键修复与改进" >> summary_report.md
-          echo "1. **修复导入路径问题**: 将'From Stdlib'和'From Coq'替换为'Require Import'，解决弃用警告" >> summary_report.md
-          echo "2. **添加自定义符号定义**: 为ℝ, ≤ℝ, +ℝ, *ℝ等自定义符号添加Notation定义" >> summary_report.md
-          echo "3. **完整编译检查**: 新增完整编译验证，确保整个文件可以编译通过" >> summary_report.md
-          echo "4. **智能修复**: 自动检测和修复常见问题" >> summary_report.md
-          echo "5. **生成编译产物**: 成功时生成.vo目标文件" >> summary_report.md
+          echo "1. **修复Stdlib逻辑路径问题**: 将'From Stdlib'替换为'From Coq'，解决Coq 8.16中的逻辑路径问题" >> summary_report.md
+          echo "2. **完整编译检查**: 新增完整编译验证，确保整个文件可以编译通过" >> summary_report.md
+          echo "3. **智能修复**: 自动检测和修复常见问题" >> summary_report.md
+          echo "4. **生成编译产物**: 成功时生成.vo目标文件" >> summary_report.md
+          echo "5. **详细报告**: 生成详细的编译报告，包括原始文件和修复后文件的编译结果" >> summary_report.md
           
           echo "" >> summary_report.md
           echo "## 后续步骤" >> summary_report.md
@@ -1111,7 +1108,7 @@ jobs:
             echo "✅ **所有检查通过** - FormalCert Probability System可以正常编译和验证" >> summary_report.md
             echo "### 建议操作：" >> summary_report.md
             echo "1. 使用生成的.vo文件进行进一步开发" >> summary_report.md
-            echo "2. 将自动修复的导入语句合并到源文件中" >> summary_report.md
+            echo "2. 考虑修复'From Stdlib'语法警告（虽然编译成功）" >> summary_report.md
             echo "3. 基于当前成功状态继续开发更多定理" >> summary_report.md
             echo "4. 使用Docker镜像进行本地开发和测试" >> summary_report.md
           elif [ "${{ needs.build-docker.result }}" = "success" ]; then
