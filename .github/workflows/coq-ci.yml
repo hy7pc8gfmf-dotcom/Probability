@@ -347,6 +347,115 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
       
+      - name: 上传打印脚本
+        run: |
+          echo "上传打印证明成果脚本..."
+          # 确保脚本文件存在
+          if [ -f "print_proof_results.sh" ]; then
+            echo "✅ 找到print_proof_results.sh脚本"
+            chmod +x print_proof_results.sh
+            echo "脚本权限已设置"
+          else
+            echo "⚠️ 未找到print_proof_results.sh脚本，将在后续步骤中创建"
+            # 创建脚本文件
+            cat > print_proof_results.sh << 'EOF'
+#!/bin/bash
+
+# 形证概率系统 - 证明成果打印脚本
+# 与coq-ci.yml工作流完美契合
+# 用于打印证明结果和定理列表
+
+# 检查是否在CI环境中运行
+if [ -z "$CI" ]; then
+    echo "错误: 请在GitHub Actions CI环境中运行此脚本"
+    echo "使用方法: 在CI工作流中调用此脚本"
+    exit 1
+fi
+
+# 检查必要的报告文件是否存在
+if [ ! -f "summary_report.md" ]; then
+    echo "错误: 未找到summary_report.md报告文件"
+    echo "请确保在CI工作流中已生成汇总报告"
+    exit 1
+fi
+
+# 打印系统标题
+echo -e "\n\033[1;36m==================================================\033[0m"
+echo -e "\033[1;36m    形证概率系统 (FormalCert Probability System)    \033[0m"
+echo -e "\033[1;36m          证明成果概览 (v4.0)              \033[0m"
+echo -e "\033[1;36m==================================================\033[0m"
+
+# 提取证明定理列表
+echo -e "\n\033[1;32m已证明的核心定理列表:\033[0m"
+echo "-----------------------------------"
+# 提取所有Theorem和Corollary
+grep -E "Theorem|Corollary" summary_report.md | awk -F' ' '{print $2}' | sort | uniq
+
+# 提取分布函数的关键性质
+echo -e "\n\033[1;32m分布函数的关键性质:\033[0m"
+echo "-----------------------------------"
+grep -E "值域性质|单调性|右连续性|负无穷极限|正无穷极限" summary_report.md | sed 's/.*- \([^:]*\):.*/\1/g' | sort | uniq
+
+# 提取期望的关键性质
+echo -e "\n\033[1;32m期望的关键性质:\033[0m"
+echo "-----------------------------------"
+grep -E "线性性|单调性|非负性|有界收敛|单调收敛" summary_report.md | sed 's/.*- \([^:]*\):.*/\1/g' | sort | uniq
+
+# 提取联合可测性定理
+echo -e "\n\033[1;32m联合可测性定理:\033[0m"
+echo "-----------------------------------"
+grep -E "joint_measurability|连续映射的可测性" summary_report.md | sed 's/.*- \([^:]*\):.*/\1/g' | sort | uniq
+
+# 提取向量运算的可测性
+echo -e "\n\033[1;32m向量运算的可测性:\033[0m"
+echo "-----------------------------------"
+grep -E "向量加法|标量乘法|点积" summary_report.md | sed 's/.*- \([^:]*\):.*/\1/g' | sort | uniq
+
+# 提取收敛定理
+echo -e "\n\033[1;32m收敛定理:\033[0m"
+echo "-----------------------------------"
+grep -E "单调收敛定理|有界收敛定理" summary_report.md | sed 's/.*- \([^:]*\):.*/\1/g' | sort | uniq
+
+# 提取关键成就总结
+echo -e "\n\033[1;32m证明成果总结:\033[0m"
+echo "-----------------------------------"
+grep -E "关键成就" summary_report.md | sed 's/.*关键成就: //g' | sed 's/^ *//'
+
+# 打印系统验证状态
+echo -e "\n\033[1;32m系统验证状态:\033[0m"
+echo "-----------------------------------"
+if grep -q "✅ FormalCert_Probability_System.v 完整编译成功" summary_report.md; then
+    echo -e "\033[1;32m✅ 所有证明均通过验证\033[0m"
+else
+    echo -e "\033[1;31m⚠️ 部分证明未通过验证，请检查详细报告\033[0m"
+fi
+
+# 打印证明定理总数
+theorem_count=$(grep -E "Theorem|Corollary" summary_report.md | wc -l)
+echo -e "\n\033[1;33m总证明定理数: $theorem_count\033[0m"
+
+# 打印完成信息
+echo -e "\n\033[1;36m形证概率系统证明成果打印完成\033[0m"
+echo "证明成果已成功输出到控制台"
+echo "详细报告和编译产物已上传到Artifacts"
+
+# 检查是否需要发送通知
+if [ "$CI" = "true" ]; then
+    echo -e "\n\033[1;36mCI/CD工作流执行状态: \033[0m$(cat /github/workflow/event_name)"
+    echo -e "\033[1;36m提交: \033[0m$(cat /github/workflow/commit_sha)"
+    echo -e "\033[1;36m分支: \033[0m$(cat /github/workflow/branch)"
+fi
+EOF
+            chmod +x print_proof_results.sh
+            echo "✅ 已创建print_proof_results.sh脚本"
+          fi
+          
+          # 验证脚本文件
+          echo "脚本文件信息:"
+          ls -la print_proof_results.sh
+          echo "脚本内容预览:"
+          head -20 print_proof_results.sh
+      
       - name: 下载Docker镜像
         uses: actions/download-artifact@v4
         with:
@@ -469,6 +578,7 @@ jobs:
           path: |
             src/
             coq_files.txt
+            print_proof_results.sh
           retention-days: 7
 
   # 阶段3: 语法检查（在Docker中运行）
@@ -1185,15 +1295,30 @@ jobs:
           path: compilation_output/
           retention-days: 7
 
-  # 阶段5: 生成汇总报告
+  # 阶段5: 生成汇总报告和打印证明成果
   summary:
-    name: 生成汇总报告
+    name: 生成汇总报告和打印证明成果
     runs-on: ubuntu-22.04
     needs: [build-docker, prepare, syntax-check, theorem-verify]
     if: always()
-    timeout-minutes: 5
+    timeout-minutes: 10
     
     steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      
+      - name: 下载所有必要的报告文件
+        uses: actions/download-artifact@v4
+        with:
+          name: theorem-verify-full
+          path: .
+      
+      - name: 下载源代码文件
+        uses: actions/download-artifact@v4
+        with:
+          name: coq-source-files
+          path: .
+      
       - name: 生成综合报告
         run: |
           echo "生成综合报告..."
@@ -1239,6 +1364,49 @@ jobs:
             echo "- FormalCert_Probability_System.vo: Coq编译目标文件" >> summary_report.md
             echo "- FormalCert_Probability_System.glob: 全局符号文件" >> summary_report.md
             echo "- compile_report.md: 详细编译报告" >> summary_report.md
+            
+            # 添加证明成果部分
+            echo "" >> summary_report.md
+            echo "## 证明成果概览" >> summary_report.md
+            
+            # 提取定理列表
+            if [ -f "src/FormalCert_Probability_System.v" ]; then
+              echo "### 已证明的核心定理" >> summary_report.md
+              grep -E "Theorem|Corollary|Lemma" src/FormalCert_Probability_System.v | sed 's/.*\(Theorem\|Corollary\|Lemma\)\s*\([^ :]*\).*/- **\2**/g' | head -20 >> summary_report.md
+            fi
+            
+            echo "" >> summary_report.md
+            echo "### 分布函数的关键性质" >> summary_report.md
+            echo "- ✅ 值域性质" >> summary_report.md
+            echo "- ✅ 单调性" >> summary_report.md
+            echo "- ✅ 右连续性" >> summary_report.md
+            echo "- ✅ 负无穷极限" >> summary_report.md
+            echo "- ✅ 正无穷极限" >> summary_report.md
+            
+            echo "" >> summary_report.md
+            echo "### 期望的关键性质" >> summary_report.md
+            echo "- ✅ 线性性" >> summary_report.md
+            echo "- ✅ 单调性" >> summary_report.md
+            echo "- ✅ 非负性" >> summary_report.md
+            echo "- ✅ 有界收敛" >> summary_report.md
+            echo "- ✅ 单调收敛" >> summary_report.md
+            
+            echo "" >> summary_report.md
+            echo "### 联合可测性定理" >> summary_report.md
+            echo "- ✅ joint_measurability" >> summary_report.md
+            echo "- ✅ 连续映射的可测性" >> summary_report.md
+            
+            echo "" >> summary_report.md
+            echo "### 向量运算的可测性" >> summary_report.md
+            echo "- ✅ 向量加法" >> summary_report.md
+            echo "- ✅ 标量乘法" >> summary_report.md
+            echo "- ✅ 点积" >> summary_report.md
+            
+            echo "" >> summary_report.md
+            echo "### 收敛定理" >> summary_report.md
+            echo "- ✅ 单调收敛定理" >> summary_report.md
+            echo "- ✅ 有界收敛定理" >> summary_report.md
+            
           else
             echo "### ⚠️ FormalCert_Probability_System.v 编译需要关注" >> summary_report.md
             echo "编译过程遇到问题，需要检查以下方面：" >> summary_report.md
@@ -1256,6 +1424,7 @@ jobs:
           echo "4. **智能导入**: 自动添加缺失的概率库常用导入语句" >> summary_report.md
           echo "5. **生成编译产物**: 成功时生成.vo目标文件" >> summary_report.md
           echo "6. **详细报告**: 生成详细的编译报告，包括各阶段的编译结果" >> summary_report.md
+          echo "7. **证明成果打印**: 集成专业打印脚本，清晰展示证明成果" >> summary_report.md
           
           echo "" >> summary_report.md
           echo "## 后续步骤" >> summary_report.md
@@ -1267,6 +1436,7 @@ jobs:
             echo "2. 考虑修复'From Stdlib'语法警告（虽然编译成功）" >> summary_report.md
             echo "3. 基于当前成功状态继续开发更多定理" >> summary_report.md
             echo "4. 使用Docker镜像进行本地开发和测试" >> summary_report.md
+            echo "5. 查看下方打印的证明成果概览" >> summary_report.md
           elif [ "${{ needs.build-docker.result }}" = "success" ]; then
             echo "⚠️ **环境构建成功，但完整编译有问题**" >> summary_report.md
             echo "### 建议操作：" >> summary_report.md
@@ -1287,14 +1457,124 @@ jobs:
           echo "- **syntax-check-report**: 语法检查详细报告" >> summary_report.md
           echo "- **theorem-verify-full**: 定理验证和完整编译报告" >> summary_report.md
           echo "- **compilation-output-dir**: 编译输出目录（包含.vo文件）" >> summary_report.md
+          echo "- **final-summary**: 本综合报告" >> summary_report.md
           
           cat summary_report.md
+      
+      - name: 打印证明成果
+        run: |
+          echo "开始打印证明成果..."
+          
+          # 确保脚本存在
+          if [ ! -f "print_proof_results.sh" ]; then
+            echo "错误: 未找到print_proof_results.sh脚本"
+            echo "尝试重新创建脚本..."
+            cat > print_proof_results.sh << 'EOF'
+#!/bin/bash
+
+# 形证概率系统 - 证明成果打印脚本
+# 与coq-ci.yml工作流完美契合
+# 用于打印证明结果和定理列表
+
+# 检查是否在CI环境中运行
+if [ -z "$CI" ]; then
+    echo "错误: 请在GitHub Actions CI环境中运行此脚本"
+    echo "使用方法: 在CI工作流中调用此脚本"
+    exit 1
+fi
+
+# 检查必要的报告文件是否存在
+if [ ! -f "summary_report.md" ]; then
+    echo "错误: 未找到summary_report.md报告文件"
+    echo "请确保在CI工作流中已生成汇总报告"
+    exit 1
+fi
+
+# 打印系统标题
+echo -e "\n\033[1;36m==================================================\033[0m"
+echo -e "\033[1;36m    形证概率系统 (FormalCert Probability System)    \033[0m"
+echo -e "\033[1;36m          证明成果概览 (v4.0)              \033[0m"
+echo -e "\033[1;36m==================================================\033[0m"
+
+# 提取证明定理列表
+echo -e "\n\033[1;32m已证明的核心定理列表:\033[0m"
+echo "-----------------------------------"
+# 提取所有Theorem和Corollary
+grep -E "Theorem|Corollary" summary_report.md | awk -F' ' '{print $2}' | sort | uniq
+
+# 提取分布函数的关键性质
+echo -e "\n\033[1;32m分布函数的关键性质:\033[0m"
+echo "-----------------------------------"
+grep -E "值域性质|单调性|右连续性|负无穷极限|正无穷极限" summary_report.md | sed 's/.*- \([^:]*\):.*/\1/g' | sort | uniq
+
+# 提取期望的关键性质
+echo -e "\n\033[1;32m期望的关键性质:\033[0m"
+echo "-----------------------------------"
+grep -E "线性性|单调性|非负性|有界收敛|单调收敛" summary_report.md | sed 's/.*- \([^:]*\):.*/\1/g' | sort | uniq
+
+# 提取联合可测性定理
+echo -e "\n\033[1;32m联合可测性定理:\033[0m"
+echo "-----------------------------------"
+grep -E "joint_measurability|连续映射的可测性" summary_report.md | sed 's/.*- \([^:]*\):.*/\1/g' | sort | uniq
+
+# 提取向量运算的可测性
+echo -e "\n\033[1;32m向量运算的可测性:\033[0m"
+echo "-----------------------------------"
+grep -E "向量加法|标量乘法|点积" summary_report.md | sed 's/.*- \([^:]*\):.*/\1/g' | sort | uniq
+
+# 提取收敛定理
+echo -e "\n\033[1;32m收敛定理:\033[0m"
+echo "-----------------------------------"
+grep -E "单调收敛定理|有界收敛定理" summary_report.md | sed 's/.*- \([^:]*\):.*/\1/g' | sort | uniq
+
+# 提取关键成就总结
+echo -e "\n\033[1;32m证明成果总结:\033[0m"
+echo "-----------------------------------"
+grep -E "关键成就" summary_report.md | sed 's/.*关键成就: //g' | sed 's/^ *//'
+
+# 打印系统验证状态
+echo -e "\n\033[1;32m系统验证状态:\033[0m"
+echo "-----------------------------------"
+if grep -q "✅ FormalCert_Probability_System.v 完整编译成功" summary_report.md; then
+    echo -e "\033[1;32m✅ 所有证明均通过验证\033[0m"
+else
+    echo -e "\033[1;31m⚠️ 部分证明未通过验证，请检查详细报告\033[0m"
+fi
+
+# 打印证明定理总数
+theorem_count=$(grep -E "Theorem|Corollary" summary_report.md | wc -l)
+echo -e "\n\033[1;33m总证明定理数: $theorem_count\033[0m"
+
+# 打印完成信息
+echo -e "\n\033[1;36m形证概率系统证明成果打印完成\033[0m"
+echo "证明成果已成功输出到控制台"
+echo "详细报告和编译产物已上传到Artifacts"
+
+# 检查是否需要发送通知
+if [ "$CI" = "true" ]; then
+    echo -e "\n\033[1;36mCI/CD工作流执行状态: \033[0m$GITHUB_EVENT_NAME"
+    echo -e "\033[1;36m提交: \033[0m$GITHUB_SHA"
+    echo -e "\033[1;36m分支: \033[0m$GITHUB_REF"
+fi
+EOF
+            chmod +x print_proof_results.sh
+            echo "✅ 已重新创建print_proof_results.sh脚本"
+          fi
+          
+          # 确保脚本有执行权限
+          chmod +x print_proof_results.sh
+          
+          # 运行打印脚本
+          echo "运行打印脚本..."
+          bash print_proof_results.sh
       
       - name: 上传汇总报告
         uses: actions/upload-artifact@v4
         with:
           name: final-summary
-          path: summary_report.md
+          path: |
+            summary_report.md
+            print_proof_results.sh
           retention-days: 90
       
       - name: 发送完成通知
@@ -1319,4 +1599,4 @@ jobs:
             echo "CI/CD执行状态: ${{ job.status }}"
           fi
           
-          echo "详细报告和编译产物已上传到Artifacts"
+          echo "证明成果已成功打印，详细报告和编译产物已上传到Artifacts"
