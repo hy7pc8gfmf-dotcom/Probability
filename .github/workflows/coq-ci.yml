@@ -1061,14 +1061,6 @@ theorem-verify:
         echo "编译输出目录内容:"
         ls -la compilation_output/ 2>/dev/null || echo "无编译输出"
       continue-on-error: true
-    
-    - name: 上传编译输出目录
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: compilation-output-dir
-        path: compilation_output/
-        retention-days: 7
 
   # 阶段5: 生成汇总报告
   summary:
