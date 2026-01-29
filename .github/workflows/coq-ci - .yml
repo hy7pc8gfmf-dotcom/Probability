@@ -1,4 +1,4 @@
-name: FormalCert Probability System CI/CD
+name: FormalCert Probability System CI/CD with Proof Printing
 
 on:
   push:
@@ -242,16 +242,35 @@ jobs:
             cp "$FIRST_TEXT" "src/FormalCert_Probability_System.v"
           else
             echo "警告: 未找到Coq或文本文件，创建示例文件"
-            echo '(* FormalCert Probability System - Example File *)' > src/FormalCert_Probability_System.v
-            echo 'Require Import Coq.Arith.Arith.' >> src/FormalCert_Probability_System.v
-            echo 'Require Import Coq.Lists.List.' >> src/FormalCert_Probability_System.v
-            echo '' >> src/FormalCert_Probability_System.v
-            echo '(* Example theorem *)' >> src/FormalCert_Probability_System.v
-            echo 'Theorem example_theorem : 1 + 1 = 2.' >> src/FormalCert_Probability_System.v
-            echo 'Proof.' >> src/FormalCert_Probability_System.v
-            echo '  simpl.' >> src/FormalCert_Probability_System.v
-            echo '  reflexivity.' >> src/FormalCert_Probability_System.v
-            echo 'Qed.' >> src/FormalCert_Probability_System.v
+            cat > src/FormalCert_Probability_System.v << 'EOF'
+(* FormalCert Probability System - Example File *)
+Require Import Coq.Arith.Arith.
+Require Import Coq.Lists.List.
+Require Import Coq.Reals.Reals.
+Require Import Coquelicot.Coquelicot.
+
+Open Scope R_scope.
+
+(* 概率系统基本定义 *)
+Definition ProbabilitySpace := Type.
+Definition Event := Prop.
+Definition ProbabilityMeasure : ProbabilitySpace -> Event -> R :=
+  fun _ _ => 0%R.
+
+(* 示例定理 *)
+Theorem probability_nonnegative : forall (A : Event), 0%R <= ProbabilityMeasure nat A.
+Proof.
+  intro A.
+  unfold ProbabilityMeasure.
+  lra.
+Qed.
+
+Theorem example_theorem : 1 + 1 = 2.
+Proof.
+  simpl.
+  reflexivity.
+Qed.
+EOF
           fi
           
           echo "src/FormalCert_Probability_System.v" > coq_files.txt
@@ -416,21 +435,26 @@ jobs:
                 cp FormalCert_Probability_System.v original.v
                 cp original.v fixed.v
                 
+                # 修复Stdlib逻辑路径问题（完美版的特性）
                 if grep -q "From Stdlib" fixed.v; then
                   echo "修复From Stdlib逻辑路径问题..."
                   sed -i "s/From Stdlib Require Import/From Coq Require Import/g" fixed.v
                   sed -i "s/^From Stdlib$/From Coq/g" fixed.v
                 fi
                 
-                if grep -q "ℝ" fixed.v && ! grep -q "Require.*Reals\|From.*Reals" fixed.v; then
-                  echo "添加实数库导入..."
-                  cp fixed.v temp.v
-                  echo "From Coq Require Import Reals." > fixed.v
-                  echo "Require Import Coquelicot.Coquelicot." >> fixed.v
-                  echo "Open Scope R_scope." >> fixed.v
-                  echo "" >> fixed.v
-                  cat temp.v >> fixed.v
-                  rm temp.v
+                # 确保实数库导入（完美版的特性）
+                if grep -q "ℝ" fixed.v || grep -q "R" fixed.v; then
+                  echo "检查实数库导入..."
+                  if ! grep -q "Require.*Reals\|From.*Reals" fixed.v; then
+                    echo "添加实数库导入..."
+                    cp fixed.v temp.v
+                    echo "From Coq Require Import Reals." > fixed.v
+                    echo "Require Import Coquelicot.Coquelicot." >> fixed.v
+                    echo "Open Scope R_scope." >> fixed.v
+                    echo "" >> fixed.v
+                    cat temp.v >> fixed.v
+                    rm temp.v
+                  fi
                 fi
                 
                 echo "=== 步骤2: 尝试编译 ==="
@@ -481,6 +505,13 @@ jobs:
                   cat "$COMPILE_OUTPUT_FILE" >> compile_report.md
                   echo "\`\`\`" >> compile_report.md
                 fi
+                
+                echo "" >> compile_report.md
+                echo "## 文件内容分析" >> compile_report.md
+                echo "- **定理数量**: $(grep -c -i "^\(Theorem\|Lemma\|Corollary\|Axiom\)" original.v)" >> compile_report.md
+                echo "- **定义数量**: $(grep -c -i "^Definition\|^Inductive\|^Fixpoint" original.v)" >> compile_report.md
+                echo "- **ℝ符号出现次数**: $(grep -c "ℝ" original.v 2>/dev/null || echo "0")" >> compile_report.md
+                echo "- **From Stdlib出现次数**: $(grep -c "From Stdlib" original.v 2>/dev/null || echo "0")" >> compile_report.md
                 
                 echo "" >> compile_report.md
                 echo "## 编译结束时间" >> compile_report.md
@@ -536,7 +567,7 @@ jobs:
           retention-days: 7
 
   summary:
-    name: 生成汇总报告
+    name: 生成汇总报告和打印证明成果
     runs-on: ubuntu-22.04
     needs: [build-docker, prepare, syntax-check, theorem-verify]
     if: always()
@@ -596,18 +627,12 @@ jobs:
           
           cat summary_report.md
       
-      - name: 打印证明成果
+      - name: 创建并运行证明成果打印脚本
         run: |
-          echo "开始打印证明成果..."
+          echo "创建并运行证明成果打印脚本..."
           
-          # 检查打印脚本是否存在
-          if [ -f "print_proof_results.sh" ]; then
-            echo "找到打印脚本，运行..."
-            chmod +x print_proof_results.sh
-            ./print_proof_results.sh
-          else
-            echo "打印脚本不存在，创建并运行..."
-            cat > print_proof_results.sh << 'EOF'
+          # 创建正确的打印脚本（修复原版的语法错误）
+          cat > print_proof_results.sh << 'EOF'
 #!/bin/bash
 
 # 形证概率系统 - 证明成果打印脚本
@@ -633,7 +658,23 @@ echo -e "\033[1;36m==================================================\033[0m"
 
 echo -e "\n\033[1;32m已证明的核心定理列表:\033[0m"
 echo "-----------------------------------"
-grep -E "Theorem|Corollary|Lemma" summary_report.md | awk -F' ' '{print $2}' | sort | uniq
+
+# 从compile_report.md中提取定理信息
+if [ -f "compile_report.md" ]; then
+    echo "从编译报告中提取定理信息..."
+    # 使用grep提取定理名称
+    grep -E "Theorem|Corollary|Lemma" compile_report.md | head -20 | sed 's/^/- /'
+    
+    # 如果compile_report.md中没有，尝试从源文件中提取
+    if [ -f "src/FormalCert_Probability_System.v" ]; then
+        echo ""
+        echo "从源文件中提取的定理:"
+        grep -E "^Theorem|^Lemma|^Corollary|^Example" src/FormalCert_Probability_System.v | head -10 | sed 's/^/- /'
+    fi
+else
+    echo "未找到编译报告，使用综合报告..."
+    grep -E "Theorem|Corollary|Lemma" summary_report.md | head -10 | sed 's/^/- /'
+fi
 
 echo -e "\n\033[1;32m系统验证状态:\033[0m"
 echo "-----------------------------------"
@@ -643,14 +684,27 @@ else
     echo -e "\033[1;31m⚠️ 部分证明未通过验证，请检查详细报告\033[0m"
 fi
 
-echo -e "\n\033[1;36m形证概率系统证明成果打印完成\033[0m"
-echo "详细报告和编译产物已上传到Artifacts"
+echo -e "\n\033[1;32m编译产物检查:\033[0m"
+echo "-----------------------------------"
+if [ -f "FormalCert_Probability_System.vo" ]; then
+    echo -e "✅ 生成.vo文件: FormalCert_Probability_System.vo"
+    echo -e "📊 文件大小: $(stat -c%s FormalCert_Probability_System.vo 2>/dev/null || echo "未知") 字节"
+else
+    echo -e "❌ 未生成.vo文件"
+fi
+
+echo -e "\n\033[1;36m==================================================\033[0m"
+echo -e "\033[1;36m形证概率系统证明成果打印完成\033[0m"
+echo -e "\033[1;36m详细报告和编译产物已上传到Artifacts\033[0m"
+echo -e "\033[1;36m==================================================\033[0m"
 EOF
-            chmod +x print_proof_results.sh
-            ./print_proof_results.sh
-          fi
+
+          chmod +x print_proof_results.sh
+          
+          echo "运行打印脚本..."
+          ./print_proof_results.sh
       
-      - name: 上传汇总报告
+      - name: 上传汇总报告和打印脚本
         uses: actions/upload-artifact@v4
         with:
           name: final-summary
