@@ -1319,7 +1319,7 @@ jobs:
             echo "CI/CD执行状态: ${{ job.status }}"
           fi
           
+      - name: Attest Build Provenance
+          uses: actions/attest-build-provenance@v3.2.0
+          
           echo "详细报告和编译产物已上传到Artifacts"
-
-- name: Attest Build Provenance
-  uses: actions/attest-build-provenance@v3.2.0
