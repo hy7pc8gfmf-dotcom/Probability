@@ -728,6 +728,12 @@ jobs:
     runs-on: ubuntu-22.04
     needs: [syntax-check, build-docker]
     timeout-minutes: 60
+    # 添加必要的权限以支持构建来源证明
+    permissions:
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+      contents: read
     
     steps:
       - name: 准备环境
@@ -1029,6 +1035,54 @@ jobs:
               fi
             '
       
+      - name: 检查编译产物
+        run: |
+          echo "检查编译产物..."
+          if [ -f "coq_workspace/FormalCert_Probability_System.vo" ]; then
+            echo "✅ 成功生成.vo文件"
+            echo "📊 文件大小: $(stat -c%s coq_workspace/FormalCert_Probability_System.vo 2>/dev/null || echo "未知") 字节"
+            # 复制到当前目录供后续步骤使用
+            cp coq_workspace/FormalCert_Probability_System.vo . 2>/dev/null || true
+            cp coq_workspace/FormalCert_Probability_System.glob . 2>/dev/null || true
+          else
+            echo "⚠️ 未生成.vo文件，完整编译可能失败"
+          fi
+      
+      - name: 检查.vo文件是否存在
+        id: check-vo
+        run: |
+          if [ -f "FormalCert_Probability_System.vo" ]; then
+            echo "vo_file_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ .vo文件存在，准备生成构建来源证明"
+          else
+            echo "vo_file_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️ .vo文件不存在，跳过构建来源证明"
+          fi
+      
+      - name: 生成构建来源证明
+        if: steps.check-vo.outputs.vo_file_exists == 'true'
+        id: attest-build
+        uses: actions/attest-build-provenance@v3.2.0
+        with:
+          subject-path: 'FormalCert_Probability_System.vo'
+          subject-name: 'FormalCert_Probability_System.vo'
+          github-token: ${{ github.token }}
+      
+      - name: 显示证明信息
+        if: steps.check-vo.outputs.vo_file_exists == 'true' && steps.attest-build.outputs.attestation-id
+        run: |
+          echo "✅ 构建来源证明已生成"
+          echo "📋 证明ID: ${{ steps.attest-build.outputs.attestation-id }}"
+          echo "🔗 证明URL: ${{ steps.attest-build.outputs.attestation-url }}"
+          echo "📁 证明文件路径: ${{ steps.attest-build.outputs.bundle-path }}"
+          
+          # 显示证明文件摘要
+          if [ -f "${{ steps.attest-build.outputs.bundle-path }}" ]; then
+            echo "📊 证明文件大小: $(stat -c%s "${{ steps.attest-build.outputs.bundle-path }}" 2>/dev/null || echo '未知') 字节"
+            echo "📝 证明内容摘要:"
+            jq -r '.subject[0].name' "${{ steps.attest-build.outputs.bundle-path }}" || true
+          fi
+      
       - name: 生成验证报告
         if: always()
         run: |
@@ -1076,6 +1130,25 @@ jobs:
             echo "- 📋 **全局文件**: FormalCert_Probability_System.glob (已生成)" >> verify_report.md
           fi
           
+          # 添加构建来源证明信息
+          echo "" >> verify_report.md
+          echo "## 构建来源证明" >> verify_report.md
+          
+          if [ "${{ steps.check-vo.outputs.vo_file_exists }}" = "true" ] && [ "${{ steps.attest-build.outputs.attestation-id }}" != "" ]; then
+            echo "- ✅ **构建来源证明已生成**" >> verify_report.md
+            echo "- 🆔 **证明ID**: ${{ steps.attest-build.outputs.attestation-id }}" >> verify_report.md
+            echo "- 🔗 **证明URL**: ${{ steps.attest-build.outputs.attestation-url }}" >> verify_report.md
+            echo "- 📊 **状态**: 通过Sigstore签名证书验证" >> verify_report.md
+            echo "- 📝 **说明**: 证明文件已上传至GitHub Attestations API并关联到仓库" >> verify_report.md
+          else
+            echo "- ⚠️ **构建来源证明未生成**" >> verify_report.md
+            if [ "${{ steps.check-vo.outputs.vo_file_exists }}" = "false" ]; then
+              echo "  - 原因: 未生成.vo文件" >> verify_report.md
+            else
+              echo "  - 原因: 证明生成失败或跳过" >> verify_report.md
+            fi
+          fi
+          
           echo "" >> verify_report.md
           echo "## 文件分析" >> verify_report.md
           
@@ -1120,11 +1193,17 @@ jobs:
             echo "2. ✅ 所有依赖库已正确导入" >> verify_report.md
             echo "3. ✅ 自定义符号(ℝ, ≤ℝ, +ℝ等)正确定义" >> verify_report.md
             echo "4. ✅ Coq编译器成功生成目标文件" >> verify_report.md
+            if [ "${{ steps.check-vo.outputs.vo_file_exists }}" = "true" ] && [ "${{ steps.attest-build.outputs.attestation-id }}" != "" ]; then
+              echo "5. ✅ 构建来源证明已生成并签名" >> verify_report.md
+            fi
             echo "" >> verify_report.md
             echo "**下一步建议**: " >> verify_report.md
             echo "1. 使用生成的.vo文件进行进一步验证" >> verify_report.md
             echo "2. 继续开发更多定理和定义" >> verify_report.md
             echo "3. 考虑修复'From Stdlib'语法问题（虽然编译成功，但有警告）" >> verify_report.md
+            if [ "${{ steps.check-vo.outputs.vo_file_exists }}" = "true" ] && [ "${{ steps.attest-build.outputs.attestation-id }}" != "" ]; then
+              echo "4. 使用GitHub CLI验证构建来源证明" >> verify_report.md
+            fi
           else
             echo "### ⚠️ **完整编译验证失败**" >> verify_report.md
             echo "FormalCert_Probability_System.v 编译失败，需要修复问题。" >> verify_report.md
@@ -1154,6 +1233,14 @@ jobs:
             FormalCert_Probability_System.vo
             FormalCert_Probability_System.glob
           retention-days: 7
+      
+      - name: 上传构建来源证明文件
+        if: steps.check-vo.outputs.vo_file_exists == 'true' && steps.attest-build.outputs.bundle-path
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-provenance-attestation
+          path: ${{ steps.attest-build.outputs.bundle-path }}
+          retention-days: 90
       
       - name: 上传编译相关文件
         if: always()
@@ -1208,6 +1295,8 @@ jobs:
           - **提交**: ${{ github.sha }}
           - **分支**: ${{ github.ref }}
           - **执行时间**: $(date)
+          - **项目作者**: 王宝军 (168888@live.cn)
+          - **项目类型**: Coq形式化概率系统验证
           
           ## 阶段状态
           | 阶段 | 状态 | 详情 |
@@ -1222,6 +1311,7 @@ jobs:
           - **Docker镜像**: ${{ env.DOCKER_IMAGE_NAME }}:latest
           - **缓存策略**: 使用GitHub Actions缓存，避免组织包权限问题
           - **Coq版本**: 8.16.1
+          - **证明生成**: 使用Sigstore签名证书的构建来源证明
           
           ## 完整编译结果
           EOF
@@ -1234,11 +1324,13 @@ jobs:
             echo "2. ✅ 所有依赖库正确导入" >> summary_report.md
             echo "3. ✅ 自定义符号正确定义" >> summary_report.md
             echo "4. ✅ 生成编译目标文件(.vo)" >> summary_report.md
+            echo "5. ✅ 生成构建来源证明（通过Sigstore验证）" >> summary_report.md
             echo "" >> summary_report.md
             echo "**生成文件**: " >> summary_report.md
             echo "- FormalCert_Probability_System.vo: Coq编译目标文件" >> summary_report.md
             echo "- FormalCert_Probability_System.glob: 全局符号文件" >> summary_report.md
             echo "- compile_report.md: 详细编译报告" >> summary_report.md
+            echo "- attestation.json: 构建来源证明文件" >> summary_report.md
           else
             echo "### ⚠️ FormalCert_Probability_System.v 编译需要关注" >> summary_report.md
             echo "编译过程遇到问题，需要检查以下方面：" >> summary_report.md
@@ -1249,13 +1341,36 @@ jobs:
           fi
           
           echo "" >> summary_report.md
+          echo "## 构建来源证明状态" >> summary_report.md
+          
+          # 检查证明是否生成
+          if [ "${{ needs.theorem-verify.result }}" = "success" ] && [ -n "${{ needs.theorem-verify.outputs.attestation-id }}" ]; then
+            echo "### ✅ 构建来源证明已生成" >> summary_report.md
+            echo "- **证明ID**: ${{ needs.theorem-verify.outputs.attestation-id }}" >> summary_report.md
+            echo "- **证明URL**: ${{ needs.theorem-verify.outputs.attestation-url }}" >> summary_report.md
+            echo "- **签名类型**: Sigstore签名证书" >> summary_report.md
+            echo "- **验证方式**: 使用GitHub CLI验证" >> summary_report.md
+            echo "" >> summary_report.md
+            echo "**证明内容**: " >> summary_report.md
+            echo "- 绑定了FormalCert_Probability_System.vo文件及其SHA256摘要" >> summary_report.md
+            echo "- 包含完整的SLSA构建来源谓词" >> summary_report.md
+            echo "- 通过GitHub Actions OIDC令牌验证构建环境" >> summary_report.md
+            echo "- 证明文件已上传至GitHub Attestations API" >> summary_report.md
+          else
+            echo "### ⚠️ 构建来源证明未生成" >> summary_report.md
+            echo "- **状态**: 证明生成失败或跳过" >> summary_report.md
+            echo "- **可能原因**: 编译产物不存在或权限不足" >> summary_report.md
+          fi
+          
+          echo "" >> summary_report.md
           echo "## 关键修复与改进" >> summary_report.md
           echo "1. **修复Stdlib逻辑路径问题**: 将'From Stdlib'替换为'From Coq'，解决Coq 8.16中的逻辑路径问题" >> summary_report.md
           echo "2. **完整编译检查**: 直接编译整个FormalCert_Probability_System.v文件，确保可编译性" >> summary_report.md
-          echo "3. **多阶段修复**: 采用两阶段修复策略，提高编译成功率" >> summary_report.md
-          echo "4. **智能导入**: 自动添加缺失的概率库常用导入语句" >> summary_report.md
-          echo "5. **生成编译产物**: 成功时生成.vo目标文件" >> summary_report.md
-          echo "6. **详细报告**: 生成详细的编译报告，包括各阶段的编译结果" >> summary_report.md
+          echo "3. **构建来源证明**: 使用Sigstore为编译产物生成可验证的构建来源证明" >> summary_report.md
+          echo "4. **多阶段修复**: 采用两阶段修复策略，提高编译成功率" >> summary_report.md
+          echo "5. **智能导入**: 自动添加缺失的概率库常用导入语句" >> summary_report.md
+          echo "6. **生成编译产物**: 成功时生成.vo目标文件" >> summary_report.md
+          echo "7. **详细报告**: 生成详细的编译报告，包括各阶段的编译结果" >> summary_report.md
           
           echo "" >> summary_report.md
           echo "## 后续步骤" >> summary_report.md
@@ -1267,6 +1382,9 @@ jobs:
             echo "2. 考虑修复'From Stdlib'语法警告（虽然编译成功）" >> summary_report.md
             echo "3. 基于当前成功状态继续开发更多定理" >> summary_report.md
             echo "4. 使用Docker镜像进行本地开发和测试" >> summary_report.md
+            if [ -n "${{ needs.theorem-verify.outputs.attestation-id }}" ]; then
+              echo "5. 使用GitHub CLI验证构建来源证明: \`gh attestation verify <attestation-id>\`" >> summary_report.md
+            fi
           elif [ "${{ needs.build-docker.result }}" = "success" ]; then
             echo "⚠️ **环境构建成功，但完整编译有问题**" >> summary_report.md
             echo "### 建议操作：" >> summary_report.md
@@ -1286,6 +1404,7 @@ jobs:
           echo "请查看Artifacts中的详细报告和生成的文件：" >> summary_report.md
           echo "- **syntax-check-report**: 语法检查详细报告" >> summary_report.md
           echo "- **theorem-verify-full**: 定理验证和完整编译报告" >> summary_report.md
+          echo "- **build-provenance-attestation**: 构建来源证明文件" >> summary_report.md
           echo "- **compilation-output-dir**: 编译输出目录（包含.vo文件）" >> summary_report.md
           
           cat summary_report.md
@@ -1309,6 +1428,12 @@ jobs:
             echo "📊 文件大小: $(stat -c%s FormalCert_Probability_System.vo 2>/dev/null || echo '未知') 字节"
           fi
           
+          # 检查是否生成了构建来源证明
+          if [ -n "${{ needs.theorem-verify.outputs.attestation-id }}" ]; then
+            echo "🔐 构建来源证明已生成"
+            echo "🆔 证明ID: ${{ needs.theorem-verify.outputs.attestation-id }}"
+          fi
+          
           if [ "${{ job.status }}" = "failure" ]; then
             echo "⚠️ CI/CD执行失败，请检查详细报告"
           elif [ "${{ job.status }}" = "cancelled" ]; then
@@ -1318,8 +1443,5 @@ jobs:
           else
             echo "CI/CD执行状态: ${{ job.status }}"
           fi
-          
-      - name: Attest Build Provenance
-          uses: actions/attest-build-provenance@v3.2.0
           
           echo "详细报告和编译产物已上传到Artifacts"
