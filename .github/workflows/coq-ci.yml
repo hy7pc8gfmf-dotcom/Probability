@@ -1320,3 +1320,6 @@ jobs:
           fi
           
           echo "详细报告和编译产物已上传到Artifacts"
+
+- name: Attest Build Provenance
+  uses: actions/attest-build-provenance@v3.2.0
