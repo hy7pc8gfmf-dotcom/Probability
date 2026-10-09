@@ -155,3 +155,8 @@ Qed.
 最后更新: 2026年01月27日
 
 "形式化验证不是限制数学创造力的枷锁，而是确保数学真理的明灯。" - FormalCert 团队
+
+
+## License | 许可
+
+Dual-licensed: **GPLv3** (academic / non-commercial / open-source use) or **commercial license** (proprietary use, including AI platforms) — see [LICENSE](LICENSE). 双许可：GPLv3（学术/非商业/开源）或商业授权（含 AI 平台闭源使用），详见 [LICENSE](LICENSE) 文件。
